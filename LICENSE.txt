@@ -1,0 +1,11 @@
+Copyright (c) 2026. All rights reserved.
+
+This repository and all files contained herein are provided for viewing and learning purposes only.
+Use of the source code, assets, or any derivative works for reproduction, modification, distribution,
+or commercial purposes is strictly prohibited without express written permission from the copyright holder.
+
+By accessing this repository, you agree that the material is not licensed for private use, reuse,
+copying, adaptation, or inclusion in any project other than your own study of the code at a distance.
+
+Unauthorized copying, redistribution, or creation of derivative works is prohibited.
+No permission is granted for any form of reuse beyond reading and learning.
