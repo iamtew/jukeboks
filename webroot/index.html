@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jukeboks</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="landing-shell">
+      <section class="hero">
+        <p class="eyebrow">Streamer.bot • YouTube Music • OBS</p>
+        <h1>Jukeboks</h1>
+        <p class="intro">
+          Jukeboks is a lightweight control layer for YouTube Music Desktop that lets you run a
+          now-playing overlay and a small control panel from a single local server.
+        </p>
+      </section>
+
+      <section class="cards">
+        <article class="card">
+          <h2>Control Panel</h2>
+          <p>Use the admin dock to issue commands and test the available YTMD actions.</p>
+          <div class="actions">
+            <a href="/admin/" class="button">Open Control Panel</a>
+            <button class="button secondary" data-copy="/admin/">Copy URL</button>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Now Playing Overlay</h2>
+          <p>Display the current track, playback state, and progress in OBS as a browser source.</p>
+          <div class="actions">
+            <a href="/overlay/" class="button">Open Overlay</a>
+            <button class="button secondary" data-copy="/overlay/">Copy URL</button>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

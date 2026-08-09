@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jukeboks Admin</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/admin/style.css" />
+  </head>
+  <body>
+    <main class="admin-shell">
+      <section class="now-playing" aria-live="polite">
+        <div class="now-playing__meta">
+          <div class="now-playing__row">
+            <div class="now-playing__state">
+              <span id="playState" class="play-state-pill">⏸</span>
+              <span class="time-pill">
+                <span id="currentTime">00:00</span>
+                <span class="time-divider">/</span>
+                <span id="totalTime">00:00</span>
+              </span>
+            </div>
+            <div class="now-playing__headline"><span id="currentMeta">Waiting for YTMD…</span></div>
+          </div>
+          <div class="progress-row">
+            <input id="progressBar" class="progress-bar" type="range" min="0" max="100" step="1" value="0" />
+          </div>
+        </div>
+      </section>
+
+      <section class="player-controls" aria-label="Playback controls">
+        <button id="prevButton" class="control-btn" type="button">⏮</button>
+        <button id="backButton" class="control-btn" type="button">⏪</button>
+        <button id="playButton" class="control-btn primary" type="button">▶</button>
+        <button id="pauseButton" class="control-btn" type="button">⏸</button>
+        <button id="forwardButton" class="control-btn" type="button">⏩</button>
+        <button id="nextButton" class="control-btn" type="button">⏭</button>
+      </section>
+
+      <nav class="tabs" aria-label="Admin sections">
+        <button class="tab active" data-page="system">System</button>
+        <button class="tab" data-page="skeleton">Skeleton</button>
+      </nav>
+
+      <section id="page-system" class="page active">
+        <div class="panel">
+          <h3>System Test Panel</h3>
+          <p class="muted">Run the available YTMD commands through the local server.</p>
+          <div class="controls">
+            <label for="commandSelect">Command</label>
+            <select id="commandSelect"></select>
+            <input id="argInput" type="text" placeholder="Optional params, e.g. seconds=10" />
+            <button id="runCommand">Run</button>
+          </div>
+          <div class="command-table-wrap">
+            <table class="command-table">
+              <thead>
+                <tr>
+                  <th>Command</th>
+                  <th>Methods</th>
+                  <th>Route</th>
+                  <th>Description</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="commandTableBody"></tbody>
+            </table>
+          </div>
+          <div class="url-box">
+            <label for="commandUrl">Manual URL</label>
+            <div class="url-row">
+              <input id="commandUrl" type="text" readonly value="Select a command" />
+              <button id="copyUrl" type="button">Copy</button>
+            </div>
+          </div>
+          <pre id="commandOutput">Waiting for a command…</pre>
+        </div>
+      </section>
+
+      <section id="page-skeleton" class="page">
+        <div class="panel">
+          <h3>Skeleton Page</h3>
+          <p class="muted">Placeholder page ready for future controls and features.</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="/admin/app.js"></script>
+  </body>
+</html>
