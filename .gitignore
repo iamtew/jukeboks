@@ -2,6 +2,11 @@
 jukeboks
 jukeboks.exe
 
+# Server config file can 
+# contain data we don't 
+# want to track potentially!
+jukeboks.json
+
 # Ignore scratchpad.... 
 # It holds my notes and junk and stuff.
 scratchpad/
