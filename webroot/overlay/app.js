@@ -1,0 +1,343 @@
+(function () {
+  const output = document.getElementById("output");
+
+  // Group UI elements by responsibility so the rest of the file stays readable.
+  const ui = {
+    songInfo: document.getElementById("songInfo"),
+    artist: document.getElementById("artist"),
+    artistWrap: document.getElementById("artistWrap"),
+    title: document.getElementById("title"),
+    titleWrap: document.getElementById("titleWrap"),
+    album: document.getElementById("album"),
+    albumWrap: document.getElementById("albumWrap"),
+    playState: document.getElementById("playState"),
+    currentTime: document.getElementById("currentTime"),
+    totalTime: document.getElementById("totalTime"),
+    marker: document.getElementById("marker"),
+    bar: document.getElementById("bar"),
+    fill: document.getElementById("fill"),
+  };
+
+  // Runtime state for the overlay.
+  const state = {
+    songDuration: 0,
+    position: 0,
+    pauseFadeTimer: null,
+    glowAnimationFrame: null,
+    isPlaybackActive: false,
+  };
+
+  // Reusable timers for each marquee instance.
+  const marqueeTimers = {
+    title: { startTimer: null, cycleTimer: null },
+    artist: { startTimer: null, cycleTimer: null },
+    album: { startTimer: null, cycleTimer: null },
+  };
+
+  // Timing constants for fade and marquee behavior.
+  const timings = {
+    fadeOutDelay: 180,
+    fadeOutDuration: 600,
+    fadeInDuration: 180,
+    marqueePause: 2000,
+    marqueeScrollFactor: 45,
+    marqueeMinScroll: 4,
+    marqueeMinReturn: 1.5,
+  };
+
+  // Enable dev mode if ?dev=true and allow host/port overrides via query params.
+  const params = new URLSearchParams(window.location.search);
+  const devMode = params.get("dev") === "true";
+  const host = params.get("host") || "localhost";
+  const port = params.get("port") || "26538";
+  const pulseParam = params.get("pulse");
+  const pulseSpeed = pulseParam === null ? 3 : Math.max(0, Math.min(10, Number(pulseParam) || 0));
+  const bgParam = params.get("bg");
+  const bgOpacityLevel = bgParam === null ? 0 : Math.max(0, Math.min(6, Number(bgParam) || 0));
+  const WS_URL = `ws://${host}:${port}/api/v1/ws`;
+
+  if (devMode) {
+    document.body.classList.add("dev");
+    output.style.display = "block";
+  } else {
+    output.style.display = "none";
+  }
+
+  function applyBackgroundOpacity() {
+    if (!ui.songInfo) return;
+
+    const normalizedOpacity = bgOpacityLevel === 0 ? 0 : 0.08 + (bgOpacityLevel / 6) * 0.42;
+    ui.songInfo.style.background = `linear-gradient(135deg,
+      rgba(14, 34, 62, ${normalizedOpacity}),
+      rgba(48, 92, 144, ${Math.min(0.5, normalizedOpacity * 0.8)}))`;
+    ui.songInfo.style.borderColor = normalizedOpacity > 0 ? "rgba(170, 220, 255, 0.22)" : "rgba(170, 220, 255, 0)";
+    ui.songInfo.style.boxShadow = normalizedOpacity > 0
+      ? "inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 10px 30px rgba(0, 0, 0, 0.25)"
+      : "none";
+  }
+
+  applyBackgroundOpacity();
+
+  let ws;
+
+  // Connect to the WebSocket feed and handle the incoming player updates.
+  function connect() {
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      log({ status: "connected", url: WS_URL });
+    };
+
+    ws.onmessage = (msg) => {
+      try {
+        const data = JSON.parse(msg.data);
+
+        if (data.type === "PLAYER_INFO" || data.type === "VIDEO_CHANGED") {
+          if (data.song) {
+            if (data.song.artist) {
+              ui.artist.textContent = data.song.artist;
+              queueTextMarquee(ui.artist, ui.artistWrap, marqueeTimers.artist);
+            }
+
+            if (data.song.title) {
+              ui.title.textContent = data.song.title;
+              queueTextMarquee(ui.title, ui.titleWrap, marqueeTimers.title);
+            }
+
+            if (data.song.album) {
+              ui.album.textContent = data.song.album;
+              queueTextMarquee(ui.album, ui.albumWrap, marqueeTimers.album);
+            } else {
+              ui.album.textContent = "";
+            }
+
+            if (data.song.songDuration) {
+              state.songDuration = data.song.songDuration;
+            }
+
+            updateRemainingTime();
+
+            ui.playState.textContent = data.song.isPaused ? "⏸" : "⏵";
+            handlePlaybackState(Boolean(data.song.isPaused));
+          }
+
+          updateOutput(data);
+        }
+
+        if (data.type === "POSITION_CHANGED") {
+          state.position = data.position || 0;
+          ui.currentTime.textContent = formatTime(state.position);
+          updateRemainingTime();
+          updateMarker();
+        }
+
+        if (data.type === "PLAYER_STATE_CHANGED") {
+          const isPaused = typeof data.isPlaying === "boolean" ? !data.isPlaying : Boolean(data.isPaused);
+          ui.playState.textContent = isPaused ? "⏸" : "⏵";
+          handlePlaybackState(isPaused);
+        }
+
+      } catch (err) {
+        log({ error: "Failed to parse message", raw: msg.data });
+      }
+    };
+
+    ws.onclose = () => {
+      log({ status: "disconnected" });
+      setTimeout(connect, 2000);
+    };
+
+    ws.onerror = (err) => {
+      log({ error: "WebSocket error", details: err });
+    };
+  }
+
+  // Update the progress bar and marker position from the latest position event.
+  function updateMarker() {
+    if (state.songDuration <= 0) return;
+
+    const barWidth = ui.bar.clientWidth;
+    const pct = state.position / state.songDuration;
+    const x = Math.min(barWidth - 6, Math.max(0, barWidth * pct));
+    const fillWidth = Math.max(0, Math.min(barWidth, barWidth * pct));
+
+    ui.marker.style.transform = `translateX(${x}px)`;
+    ui.fill.style.width = `${fillWidth}px`;
+  }
+
+  function updateRemainingTime() {
+    if (!ui.totalTime) return;
+
+    const remaining = Math.max(0, state.songDuration - state.position);
+    ui.totalTime.textContent = formatTime(remaining);
+  }
+
+  // Turn the chromatic glow off completely when the overlay is dimmed or inactive.
+  function setGlowEffectDisabled() {
+    if (ui.songInfo) {
+      ui.songInfo.style.textShadow = "none";
+    }
+  }
+
+  // Animate the glow with a sine-wave pulse so it feels alive without tracking playback progress.
+  function updateGlowPulse(timestamp) {
+    if (!ui.songInfo || !state.isPlaybackActive) {
+      setGlowEffectDisabled();
+      state.glowAnimationFrame = null;
+      return;
+    }
+
+    const opacityValue = parseFloat(ui.songInfo.style.opacity || "1");
+    if (opacityValue < 0.99) {
+      setGlowEffectDisabled();
+      state.glowAnimationFrame = window.requestAnimationFrame(updateGlowPulse);
+      return;
+    }
+
+    const speedScale = pulseSpeed <= 0 ? 0 : Math.max(0.1, pulseSpeed / 5);
+    const pulse = (Math.sin(timestamp * 0.003 * speedScale) + 1) / 2;
+    const intensity = 0.2 + pulse * 0.8;
+    const glowSpread = 4 + intensity * 16;
+    const sideOffset = 1.5 + intensity * 5;
+    const primaryAlpha = 0.2 + intensity * 0.55;
+    const secondaryAlpha = 0.12 + intensity * 0.3;
+    const tertiaryAlpha = 0.08 + intensity * 0.25;
+
+    ui.songInfo.style.textShadow = `
+      0px 0px ${glowSpread}px rgba(209, 76, 255, ${primaryAlpha}),
+      ${sideOffset}px 0px ${glowSpread - 4}px rgba(255, 0, 255, ${secondaryAlpha}),
+      ${-sideOffset}px 0px ${glowSpread - 4}px rgba(0, 255, 255, ${tertiaryAlpha})
+    `;
+
+    state.glowAnimationFrame = window.requestAnimationFrame(updateGlowPulse);
+  }
+
+  function startGlowPulse() {
+    if (pulseSpeed <= 0) {
+      stopGlowPulse();
+      return;
+    }
+
+    if (state.glowAnimationFrame) {
+      cancelAnimationFrame(state.glowAnimationFrame);
+    }
+
+    state.isPlaybackActive = true;
+    state.glowAnimationFrame = window.requestAnimationFrame(updateGlowPulse);
+  }
+
+  function stopGlowPulse() {
+    state.isPlaybackActive = false;
+    if (state.glowAnimationFrame) {
+      cancelAnimationFrame(state.glowAnimationFrame);
+      state.glowAnimationFrame = null;
+    }
+    setGlowEffectDisabled();
+  }
+
+  function formatTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  function updateOutput(data) {
+    if (!devMode) return;
+    output.textContent = JSON.stringify(data, null, 2);
+  }
+
+  function log(obj) {
+    if (!devMode) return;
+    output.textContent = JSON.stringify(obj, null, 2);
+  }
+
+  function setSongInfoOpacity(opacity, duration) {
+    if (!ui.songInfo) return;
+    ui.songInfo.style.transition = `opacity ${duration}ms ease`;
+    ui.songInfo.style.opacity = String(opacity);
+  }
+
+  function resetPauseFade() {
+    if (state.pauseFadeTimer) {
+      clearTimeout(state.pauseFadeTimer);
+      state.pauseFadeTimer = null;
+    }
+  }
+
+  // Pause handling: dim the overlay after a short delay and stop the glow while faint.
+  function handlePlaybackState(isPaused) {
+    resetPauseFade();
+
+    if (isPaused) {
+      state.pauseFadeTimer = window.setTimeout(() => {
+        setSongInfoOpacity(0.25, timings.fadeOutDuration);
+        stopGlowPulse();
+      }, timings.fadeOutDelay);
+      return;
+    }
+
+    setSongInfoOpacity(1, timings.fadeInDuration);
+    startGlowPulse();
+  }
+
+  function getMarqueeWrapWidth(wrapEl) {
+    const barWidth = ui.bar.clientWidth || 500;
+    const totalTimeWidth = ui.totalTime ? ui.totalTime.offsetWidth : 0;
+    const desiredWrapWidth = barWidth + totalTimeWidth;
+    return Math.max(1, Math.min(wrapEl.parentElement.clientWidth, desiredWrapWidth));
+  }
+
+  // Reusable marquee logic for both the artist and the title.
+  function queueTextMarquee(textEl, wrapEl, timers) {
+    clearTimeout(timers.startTimer);
+    clearTimeout(timers.cycleTimer);
+
+    window.requestAnimationFrame(() => {
+      if (!textEl || !wrapEl) return;
+
+      const wrapWidth = getMarqueeWrapWidth(wrapEl);
+      wrapEl.style.width = `${wrapWidth}px`;
+
+      textEl.style.transition = "none";
+      textEl.style.transform = "translateX(0px)";
+
+      const textWidth = textEl.scrollWidth;
+      if (textWidth <= wrapWidth) {
+        return;
+      }
+
+      const offset = textWidth - wrapWidth;
+      const scrollDuration = Math.max(timings.marqueeMinScroll, offset / timings.marqueeScrollFactor);
+      const returnDuration = Math.max(timings.marqueeMinReturn, scrollDuration / 3);
+
+      timers.startTimer = window.setTimeout(() => {
+        textEl.style.transition = `transform ${scrollDuration}s linear`;
+        textEl.style.transform = `translateX(-${offset}px)`;
+
+        timers.cycleTimer = window.setTimeout(() => {
+          textEl.style.transition = `transform ${returnDuration}s linear`;
+          textEl.style.transform = "translateX(0px)";
+
+          window.setTimeout(() => {
+            queueTextMarquee(textEl, wrapEl, timers);
+          }, timings.marqueePause);
+        }, scrollDuration * 1000 + timings.marqueePause);
+      }, timings.marqueePause);
+    });
+  }
+
+  // Kick off marquee animations once the layout is ready.
+  window.requestAnimationFrame(() => {
+    queueTextMarquee(ui.title, ui.titleWrap, marqueeTimers.title);
+    queueTextMarquee(ui.artist, ui.artistWrap, marqueeTimers.artist);
+    queueTextMarquee(ui.album, ui.albumWrap, marqueeTimers.album);
+  });
+
+  window.addEventListener("resize", () => {
+    queueTextMarquee(ui.title, ui.titleWrap, marqueeTimers.title);
+    queueTextMarquee(ui.artist, ui.artistWrap, marqueeTimers.artist);
+    queueTextMarquee(ui.album, ui.albumWrap, marqueeTimers.album);
+  });
+
+  connect();
+})();

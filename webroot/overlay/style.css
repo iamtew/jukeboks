@@ -1,0 +1,159 @@
+/* Import Better VCR font FIRST */
+@import url('https://fonts.cdnfonts.com/css/better-vcr');
+
+/* Global reset for the OBS overlay canvas. */
+html,
+body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Better VCR', sans-serif;
+    color: #eee;
+}
+
+/* Dev mode uses a visible background so the overlay can be previewed easily. */
+body.dev {
+    background: #111;
+}
+
+/* JSON output used when the overlay is opened in development mode. */
+#output {
+    white-space: pre-wrap;
+    font-size: 10pt;
+    padding: 20px;
+}
+
+/* Song info block */
+#songInfo {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 20px;
+    font-size: 1.2em;
+    color: #e0fefe;
+    width: 500px;
+    position: relative;
+    opacity: 1;
+    transition: opacity 180ms ease;
+    background: linear-gradient(135deg,
+        rgba(14, 34, 62, 0.55),
+        rgba(48, 92, 144, 0.28));
+    border: 1px solid rgba(170, 220, 255, 0.22);
+    border-radius: 16px;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        0 10px 30px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(12px) saturate(120%);
+    -webkit-backdrop-filter: blur(12px) saturate(120%);
+    text-shadow:
+        0px 0px 6px rgba(209, 76, 255, 0.6),
+        2px 0px 4px rgba(255, 0, 255, 0.35),
+        -2px 0px 4px rgba(0, 255, 255, 0.25);
+}
+
+/* Two-column layout for the play state and track text. */
+#infoRow {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+}
+
+#playState {
+    font-size: 3.3em;
+    opacity: 0.85;
+    min-width: 60px;
+}
+
+#textBlock {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Artist, title, and album marquee containers. */
+#artistWrap,
+#titleWrap,
+#albumWrap {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+    height: 1.35em;
+}
+
+/* Artist, title, and album text that moves left when it overflows the visible area. */
+#artist,
+#title,
+#album {
+    font-size: 1em;
+    opacity: 0.9;
+    white-space: nowrap;
+    display: inline-block;
+    transform: translateX(0);
+    transform-origin: left center;
+    will-change: transform;
+}
+
+/* Artist name styling. */
+#artist {
+    font-weight: bold;
+    font-size: 1.1em;
+    letter-spacing: 0.5px;
+}
+
+/* Album styling. */
+#album {
+    font-size: 0.95em;
+    opacity: 0.85;
+}
+
+/* Progress bar */
+#progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    font-size: 1em;
+}
+
+#bar {
+    position: relative;
+    width: 500px;
+    height: 24px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+#fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 0;
+    background: linear-gradient(to right,
+        #E5F20D,
+        #F20D0D,
+        #E5F20D);
+    background-size: 200% 100%;
+    box-shadow: 0 0 8px #F20D0D, 0 0 12px #E5F20D;
+    transition: width 0.15s linear;
+}
+
+#marker {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 6px;
+    height: 24px;
+    background: #eee;
+    /* border-radius: 50%; */
+    transform: translateX(0);
+    z-index: 2;
+}

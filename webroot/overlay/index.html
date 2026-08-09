@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Now Playing Overlay</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+<!-- Main overlay panel that shows the current song metadata and playback progress. -->
+<div id="songInfo">
+
+    <div id="infoRow">
+        <div id="playState">⏸</div>
+
+        <div id="textBlock">
+            <div id="artistWrap">
+                <div id="artist">Artist</div>
+            </div>
+
+            <!-- The title is animated here as a marquee when it overflows the visible area. -->
+            <div id="titleWrap">
+                <div id="title">Title</div>
+            </div>
+            <div id="albumWrap">
+                <div id="album">Album</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="progress">
+        <span id="currentTime">00:00</span>
+        <div id="bar">
+            <div id="fill"></div>
+            <div id="marker"></div>
+        </div>
+        <span id="totalTime">00:00</span>
+    </div>
+
+</div>
+
+<pre id="output" style="display:none;">Waiting for events...</pre>
+
+<script src="app.js"></script>
+</body>
+
+</html>
