@@ -164,6 +164,48 @@ func listenWithFallback(port string) (net.Listener, string, error) {
 	return nil, "", fmt.Errorf("unable to bind to port %s or any fallback ports", port)
 }
 
+func fetchYTMDJSONWithRetry(target *url.URL, endpoint string, attempts int, delay time.Duration) (any, error) {
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		resp, err := http.Get(target.String() + endpoint)
+		if err != nil {
+			lastErr = err
+			if attempt < attempts-1 {
+				time.Sleep(delay)
+				continue
+			}
+			return nil, err
+		}
+
+		if resp.StatusCode >= 400 {
+			lastErr = fmt.Errorf("endpoint returned %d", resp.StatusCode)
+			resp.Body.Close()
+			if attempt < attempts-1 {
+				time.Sleep(delay)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		var payload any
+		decoder := json.NewDecoder(resp.Body)
+		err = decoder.Decode(&payload)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to decode payload: %w", err)
+			if attempt < attempts-1 {
+				time.Sleep(delay)
+				continue
+			}
+			return nil, lastErr
+		}
+
+		return payload, nil
+	}
+
+	return nil, lastErr
+}
+
 func queueInfoHandler(target *url.URL, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, responseEnvelope{ExitCode: 1, Message: "queueinfo requires GET"})
@@ -172,34 +214,17 @@ func queueInfoHandler(target *url.URL, w http.ResponseWriter, r *http.Request) {
 
 	var songPayload any
 	var queuePayload any
+	var err error
 
-	songResp, err := http.Get(target.String() + "/api/v1/song")
+	songPayload, err = fetchYTMDJSONWithRetry(target, "/api/v1/song", 3, 250*time.Millisecond)
 	if err != nil {
 		writeJSON(w, responseEnvelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach song endpoint: %v", err)})
 		return
 	}
-	defer songResp.Body.Close()
-	if songResp.StatusCode >= 400 {
-		writeJSON(w, responseEnvelope{ExitCode: 1, Message: fmt.Sprintf("song endpoint returned %d", songResp.StatusCode)})
-		return
-	}
-	if err := json.NewDecoder(songResp.Body).Decode(&songPayload); err != nil {
-		writeJSON(w, responseEnvelope{ExitCode: 1, Message: fmt.Sprintf("failed to decode song payload: %v", err)})
-		return
-	}
 
-	queueResp, err := http.Get(target.String() + "/api/v1/queue")
+	queuePayload, err = fetchYTMDJSONWithRetry(target, "/api/v1/queue", 3, 250*time.Millisecond)
 	if err != nil {
 		writeJSON(w, responseEnvelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach queue endpoint: %v", err)})
-		return
-	}
-	defer queueResp.Body.Close()
-	if queueResp.StatusCode >= 400 {
-		writeJSON(w, responseEnvelope{ExitCode: 1, Message: fmt.Sprintf("queue endpoint returned %d", queueResp.StatusCode)})
-		return
-	}
-	if err := json.NewDecoder(queueResp.Body).Decode(&queuePayload); err != nil {
-		writeJSON(w, responseEnvelope{ExitCode: 1, Message: fmt.Sprintf("failed to decode queue payload: %v", err)})
 		return
 	}
 
@@ -214,18 +239,10 @@ func songInfoHandler(target *url.URL, w http.ResponseWriter, r *http.Request) {
 	}
 
 	var songPayload any
-	songResp, err := http.Get(target.String() + "/api/v1/song")
+	var err error
+	songPayload, err = fetchYTMDJSONWithRetry(target, "/api/v1/song", 3, 250*time.Millisecond)
 	if err != nil {
 		writeJSON(w, responseEnvelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach song endpoint: %v", err)})
-		return
-	}
-	defer songResp.Body.Close()
-	if songResp.StatusCode >= 400 {
-		writeJSON(w, responseEnvelope{ExitCode: 1, Message: fmt.Sprintf("song endpoint returned %d", songResp.StatusCode)})
-		return
-	}
-	if err := json.NewDecoder(songResp.Body).Decode(&songPayload); err != nil {
-		writeJSON(w, responseEnvelope{ExitCode: 1, Message: fmt.Sprintf("failed to decode song payload: %v", err)})
 		return
 	}
 
@@ -324,42 +341,94 @@ func buildQueueInfoResponse(songPayload, queuePayload any) responseEnvelope {
 	}
 
 	entries := collectQueueEntriesForCommand(queueData)
+	entries = reorderQueueEntriesFromCurrentSong(entries, songData)
 	if len(entries) == 0 {
 		return responseEnvelope{ExitCode: 1, Message: "Queue unavailable. No queue items were returned by the player.", Data: map[string]any{"reason": "empty_queue"}}
 	}
 
 	summary := summarizeQueueEntries(entries)
-	message := fmt.Sprintf("Queue: %s, totaling %s.", summary.Display, formatMinutes(summary.TotalDurationSeconds))
-	return responseEnvelope{ExitCode: 0, Message: message, Data: map[string]any{"songs": summary.Items, "totalSeconds": summary.TotalDurationSeconds, "display": summary.Display}}
+	message := fmt.Sprintf("Queue: %s. %d songs, %s total.", summary.Display, len(summary.Items), formatMinutes(summary.TotalDurationSeconds))
+	return responseEnvelope{ExitCode: 0, Message: message, Data: map[string]any{"songs": summary.Items, "totalSeconds": summary.TotalDurationSeconds, "display": summary.Display, "count": len(summary.Items)}}
 }
 
 func collectQueueEntriesForCommand(payload any) []queueEntrySummary {
-	var collected []queueEntrySummary
-	seen := map[string]struct{}{}
-	var walk func(any)
-	walk = func(value any) {
+	if payload == nil {
+		return nil
+	}
+
+	queueCandidates := []any{}
+	var collectCandidates func(any)
+	collectCandidates = func(value any) {
 		switch typed := value.(type) {
 		case []any:
 			for _, item := range typed {
-				walk(item)
+				collectCandidates(item)
 			}
 		case map[string]any:
-			if isQueueEntryLikeForCommand(typed) {
-				entry := summarizeQueueEntry(typed)
-				if entry.Title != "" {
-					key := strings.ToLower(entry.Title + "::" + entry.Artist + "::" + entry.VideoID)
-					if _, ok := seen[key]; !ok {
-						seen[key] = struct{}{}
-						collected = append(collected, entry)
-					}
+			for _, key := range []string{"items", "entries", "contents", "content", "queue"} {
+				if nested, ok := typed[key]; ok {
+					queueCandidates = append(queueCandidates, nested)
 				}
 			}
 			for _, item := range typed {
-				walk(item)
+				collectCandidates(item)
 			}
 		}
 	}
-	walk(payload)
+	collectCandidates(payload)
+
+	if len(queueCandidates) == 0 {
+		queueCandidates = append(queueCandidates, payload)
+	}
+
+	var collected []queueEntrySummary
+	seen := map[string]struct{}{}
+	for _, candidate := range queueCandidates {
+		var walk func(any)
+		walk = func(value any) {
+			switch typed := value.(type) {
+			case []any:
+				for _, item := range typed {
+					walk(item)
+				}
+			case map[string]any:
+				if isQueueEntryLikeForCommand(typed) {
+					entry := summarizeQueueEntry(typed)
+					if entry.Title != "" {
+						identityKeys := queueEntryIdentityKeys(typed, entry)
+						if len(identityKeys) == 0 {
+							return
+						}
+						matched := false
+						for _, key := range identityKeys {
+							normalizedKey := strings.ToLower(key)
+							if _, ok := seen[normalizedKey]; ok {
+								matched = true
+								break
+							}
+						}
+						if matched {
+							return
+						}
+						for _, key := range identityKeys {
+							normalizedKey := strings.ToLower(key)
+							seen[normalizedKey] = struct{}{}
+						}
+						collected = append(collected, entry)
+					}
+				}
+				for _, key := range []string{"items", "entries", "contents", "content", "queue"} {
+					if nested, ok := typed[key]; ok {
+						walk(nested)
+					}
+				}
+				for _, item := range typed {
+					walk(item)
+				}
+			}
+		}
+		walk(candidate)
+	}
 	return collected
 }
 
@@ -379,6 +448,56 @@ type queueSummary struct {
 	TotalDurationSeconds int
 }
 
+func reorderQueueEntriesFromCurrentSong(entries []queueEntrySummary, songData map[string]any) []queueEntrySummary {
+	if len(entries) <= 1 {
+		return entries
+	}
+
+	currentTitle := asString(songData["title"])
+	if currentTitle == "" {
+		currentTitle = asString(songData["name"])
+	}
+	currentArtist := asString(songData["artist"])
+	if currentArtist == "" {
+		currentArtist = asString(songData["artistName"])
+	}
+	currentVideoID := asString(songData["videoId"])
+	if currentVideoID == "" {
+		currentVideoID = asString(songData["video_id"])
+	}
+
+	if currentTitle == "" && currentArtist == "" && currentVideoID == "" {
+		return entries
+	}
+
+	currentIndex := -1
+	for idx, entry := range entries {
+		if currentVideoID != "" && strings.EqualFold(entry.VideoID, currentVideoID) {
+			currentIndex = idx
+			break
+		}
+		if currentTitle != "" && strings.EqualFold(entry.Title, currentTitle) {
+			currentIndex = idx
+			break
+		}
+		if currentArtist != "" && strings.EqualFold(entry.Artist, currentArtist) && currentTitle != "" && strings.EqualFold(entry.Title, currentTitle) {
+			currentIndex = idx
+			break
+		}
+		if currentArtist != "" && strings.EqualFold(entry.Artist, currentArtist) {
+			currentIndex = idx
+			break
+		}
+	}
+
+	if currentIndex <= 0 {
+		return entries
+	}
+
+	remaining := append([]queueEntrySummary(nil), entries[currentIndex:]...)
+	return remaining
+}
+
 func summarizeQueueEntries(entries []queueEntrySummary) queueSummary {
 	if len(entries) == 0 {
 		return queueSummary{}
@@ -396,11 +515,15 @@ func summarizeQueueEntries(entries []queueEntrySummary) queueSummary {
 
 	displayParts := make([]string, 0, len(visible))
 	for _, entry := range visible {
-		displayParts = append(displayParts, entry.DisplayText)
+		if entry.Artist != "" && entry.Title != "" {
+			displayParts = append(displayParts, fmt.Sprintf("%s - %s", entry.Artist, entry.Title))
+		} else {
+			displayParts = append(displayParts, entry.DisplayText)
+		}
 	}
 	display := strings.Join(displayParts, ", ")
 	if len(items) > len(visible) {
-		display = display + fmt.Sprintf(", plus %d more", len(items)-len(visible))
+		display = display + fmt.Sprintf(", +%d more", len(items)-len(visible))
 	}
 
 	totalSeconds := 0
@@ -416,19 +539,15 @@ func summarizeQueueEntry(value map[string]any) queueEntrySummary {
 	var videoID string
 	var durationSeconds int
 
-	if renderer, ok := value["playlistPanelVideoRenderer"].(map[string]any); ok {
+	renderer := extractQueueRendererCandidate(value)
+	if renderer != nil {
 		title = extractTextFromRunsCommand(renderer["title"])
-		artist = extractTextFromRunsCommand(renderer["longBylineText"])
-		videoID = asString(renderer["videoId"])
-		durationSeconds = parseDurationSecondsCommand(extractTextFromRunsCommand(renderer["lengthText"]))
-	} else if renderer, ok := value["videoRenderer"].(map[string]any); ok {
-		title = extractTextFromRunsCommand(renderer["title"])
-		artist = extractTextFromRunsCommand(renderer["longBylineText"])
+		artist = normalizeBylineArtistCommand(renderer["longBylineText"])
 		videoID = asString(renderer["videoId"])
 		durationSeconds = parseDurationSecondsCommand(extractTextFromRunsCommand(renderer["lengthText"]))
 	} else {
 		title = extractTextFromRunsCommand(value["title"])
-		artist = extractTextFromRunsCommand(value["longBylineText"])
+		artist = normalizeBylineArtistCommand(value["longBylineText"])
 		videoID = asString(value["videoId"])
 		durationSeconds = parseDurationSecondsCommand(extractTextFromRunsCommand(value["lengthText"]))
 	}
@@ -452,12 +571,150 @@ func summarizeQueueEntry(value map[string]any) queueEntrySummary {
 
 	displayText := title
 	if artist != "" {
-		displayText = fmt.Sprintf("%s — %s", title, artist)
+		displayText = fmt.Sprintf("%s - %s", artist, title)
 	}
 	return queueEntrySummary{Title: title, Artist: artist, VideoID: videoID, DurationSeconds: durationSeconds, DurationLabel: formatMinutes(durationSeconds), DisplayText: displayText}
 }
 
+func extractQueueRendererCandidate(value map[string]any) map[string]any {
+	if value == nil {
+		return nil
+	}
+
+	for _, key := range []string{"playlistPanelVideoRenderer", "videoRenderer", "musicResponsiveListItemRenderer", "playlistPanelRenderer"} {
+		if renderer, ok := value[key].(map[string]any); ok {
+			return renderer
+		}
+	}
+
+	for _, key := range []string{"primaryRenderer", "renderer"} {
+		if nested, ok := value[key].(map[string]any); ok {
+			if renderer := extractQueueRendererCandidate(nested); renderer != nil {
+				return renderer
+			}
+		}
+	}
+
+	if nested, ok := value["playlistPanelVideoWrapperRenderer"].(map[string]any); ok {
+		if renderer := extractQueueRendererCandidate(nested); renderer != nil {
+			return renderer
+		}
+	}
+
+	for _, candidate := range value {
+		nested, ok := candidate.(map[string]any)
+		if !ok {
+			continue
+		}
+		if renderer := extractQueueRendererCandidate(nested); renderer != nil {
+			return renderer
+		}
+	}
+
+	return nil
+}
+
+func queueEntryIdentityKeys(value map[string]any, entry queueEntrySummary) []string {
+	keys := []string{}
+
+	titleVariants := extractQueueTitleVariants(value)
+	artistVariants := extractQueueArtistVariants(value)
+	if entry.Title != "" {
+		titleVariants = append(titleVariants, entry.Title)
+	}
+	if entry.Artist != "" {
+		artistVariants = append(artistVariants, entry.Artist)
+	}
+	titleVariants = uniqueStrings(titleVariants)
+	artistVariants = uniqueStrings(artistVariants)
+
+	for _, title := range titleVariants {
+		for _, artist := range artistVariants {
+			if title != "" && artist != "" {
+				keys = append(keys, "title-artist:"+normalizeQueueIdentityToken(title)+":"+normalizeQueueIdentityToken(artist))
+			}
+		}
+	}
+
+	if len(keys) == 0 {
+		if entry.VideoID != "" {
+			keys = append(keys, "video:"+strings.ToLower(strings.TrimSpace(entry.VideoID)))
+		}
+		return uniqueStrings(keys)
+	}
+
+	if entry.VideoID != "" {
+		keys = append(keys, "video:"+strings.ToLower(strings.TrimSpace(entry.VideoID)))
+	}
+
+	return uniqueStrings(keys)
+}
+
+func extractQueueTitleVariants(value map[string]any) []string {
+	variants := []string{}
+	for _, key := range []string{"title", "titleText", "displayTitle", "shortTitle", "songTitle", "track", "name", "alternativeTitle", "altTitle", "secondaryTitle"} {
+		if text := extractTextFromRunsCommand(value[key]); text != "" {
+			variants = append(variants, text)
+		}
+	}
+	if renderer := extractQueueRendererCandidate(value); renderer != nil {
+		for _, key := range []string{"title", "titleText", "displayTitle", "shortTitle", "songTitle", "track", "name", "alternativeTitle", "altTitle", "secondaryTitle"} {
+			if text := extractTextFromRunsCommand(renderer[key]); text != "" {
+				variants = append(variants, text)
+			}
+		}
+	}
+	return uniqueStrings(variants)
+}
+
+func extractQueueArtistVariants(value map[string]any) []string {
+	variants := []string{}
+	for _, key := range []string{"artist", "artistName", "author", "channel", "longBylineText", "shortBylineText", "bylineText", "authorText", "ownerText"} {
+		if text := extractTextFromRunsCommand(value[key]); text != "" {
+			variants = append(variants, text)
+		}
+	}
+	if renderer := extractQueueRendererCandidate(value); renderer != nil {
+		for _, key := range []string{"artist", "artistName", "author", "channel", "longBylineText", "shortBylineText", "bylineText", "authorText", "ownerText"} {
+			if text := extractTextFromRunsCommand(renderer[key]); text != "" {
+				variants = append(variants, text)
+			}
+		}
+	}
+	return uniqueStrings(variants)
+}
+
+func normalizeQueueIdentityToken(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "&", " and ")
+	value = strings.ReplaceAll(value, "'", "")
+	value = strings.ReplaceAll(value, "\"", "")
+	value = strings.ReplaceAll(value, "  ", " ")
+	return strings.TrimSpace(value)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
 func isQueueEntryLikeForCommand(value map[string]any) bool {
+	if extractQueueRendererCandidate(value) != nil {
+		return true
+	}
 	_, hasRenderer := value["playlistPanelVideoRenderer"]
 	_, hasVideoRenderer := value["videoRenderer"]
 	_, hasMusicRenderer := value["musicResponsiveListItemRenderer"]
@@ -494,6 +751,28 @@ func extractTextFromRunsCommand(value any) string {
 		}
 	}
 	return ""
+}
+
+func normalizeBylineArtistCommand(value any) string {
+	text := extractTextFromRunsCommand(value)
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	for _, sep := range []string{" • ", "•", " - ", " – ", " / ", " | ", " — "} {
+		if strings.Contains(text, sep) {
+			parts := strings.Split(text, sep)
+			for _, part := range parts {
+				trimmed := strings.TrimSpace(part)
+				if trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+
+	return text
 }
 
 func parseDurationSecondsCommand(value string) int {
@@ -925,22 +1204,12 @@ func loadConfig(path string) (jukeboksConfig, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return jukeboksConfig{}, err
 	}
-	if cfg.Blacklist == nil {
-		cfg.Blacklist = []string{"Rick Astley"}
-	}
-	if cfg.MaxDuration == 0 {
-		cfg.MaxDuration = 600
-	}
+	cfg = normalizeConfig(cfg)
 	return cfg, nil
 }
 
 func saveConfig(path string, cfg jukeboksConfig) error {
-	if cfg.Blacklist == nil {
-		cfg.Blacklist = []string{"Rick Astley"}
-	}
-	if cfg.MaxDuration == 0 {
-		cfg.MaxDuration = 600
-	}
+	cfg = normalizeConfig(cfg)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -948,6 +1217,38 @@ func saveConfig(path string, cfg jukeboksConfig) error {
 	}
 	data = append(data, '\n')
 	return os.WriteFile(path, data, 0o644)
+}
+
+func normalizeConfig(cfg jukeboksConfig) jukeboksConfig {
+	if cfg.Blacklist == nil {
+		cfg.Blacklist = []string{"Rick Astley"}
+		return cfg
+	}
+
+	normalizedBlacklist := make([]string, 0, len(cfg.Blacklist))
+	seen := map[string]struct{}{}
+	for _, entry := range cfg.Blacklist {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[strings.ToLower(trimmed)]; ok {
+			continue
+		}
+		seen[strings.ToLower(trimmed)] = struct{}{}
+		normalizedBlacklist = append(normalizedBlacklist, trimmed)
+	}
+	if len(normalizedBlacklist) == 0 {
+		cfg.Blacklist = []string{"Rick Astley"}
+	} else {
+		cfg.Blacklist = normalizedBlacklist
+	}
+
+	if cfg.MaxDuration <= 0 || cfg.MaxDuration > 86400 {
+		cfg.MaxDuration = 600
+	}
+
+	return cfg
 }
 
 func netJoin(host, port string) string {

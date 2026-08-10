@@ -430,6 +430,50 @@ function extractTextFromRuns(value) {
     if (typeof value.text === 'string') {
       return value.text;
     }
+    if (typeof value.simpleText === 'string') {
+      return value.simpleText;
+    }
+    if (typeof value.label === 'string') {
+      return value.label;
+    }
+    if (typeof value.displayText === 'string') {
+      return value.displayText;
+    }
+    if (typeof value.name === 'string') {
+      return value.name;
+    }
+    if (typeof value.title === 'string') {
+      return value.title;
+    }
+  }
+  return '';
+}
+
+function normalizeBylineArtist(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  const separators = [' • ', '•', ' - ', ' – ', ' / ', ' | ', ' — '];
+  for (const separator of separators) {
+    if (text.includes(separator)) {
+      const parts = text.split(separator).map((part) => part.trim()).filter(Boolean);
+      if (parts.length > 0) {
+        return parts[0];
+      }
+    }
+  }
+
+  return text;
+}
+
+function pickPreferredText(values) {
+  for (const value of values) {
+    const text = extractTextFromRuns(value);
+    if (text && text.trim()) {
+      return text.trim();
+    }
   }
   return '';
 }
@@ -477,14 +521,52 @@ function extractQueueIndexFromContext(value, fallback = 0) {
   return fallback;
 }
 
+function findQueueRendererCandidate(value, seen = new WeakSet()) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (seen.has(value)) return null;
+  seen.add(value);
+
+  const directKeys = ['playlistPanelVideoRenderer', 'videoRenderer', 'musicResponsiveListItemRenderer', 'playlistPanelRenderer'];
+  for (const key of directKeys) {
+    const candidate = value[key];
+    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const key of ['primaryRenderer', 'renderer', 'playlistPanelVideoWrapperRenderer']) {
+    const candidate = value[key];
+    const resolved = findQueueRendererCandidate(candidate, seen);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  for (const candidate of Object.values(value)) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      continue;
+    }
+    const resolved = findQueueRendererCandidate(candidate, seen);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return null;
+}
+
 function isQueueEntryLike(value) {
   if (!value || typeof value !== 'object') return false;
   if (Array.isArray(value)) return false;
-  const renderer = value.playlistPanelVideoRenderer || value.videoRenderer || value.musicResponsiveListItemRenderer || value.playlistPanelRenderer;
+  const renderer = findQueueRendererCandidate(value);
   return Boolean(
     renderer
     || value.title
     || value.titleText
+    || value.alternativeTitle
+    || value.altTitle
+    || value.secondaryTitle
+    || value.songTitle
     || value.longBylineText
     || value.shortBylineText
     || value.videoId
@@ -496,9 +578,9 @@ function isQueueEntryLike(value) {
   );
 }
 
-function collectQueueEntries(value, collected = [], seen = new WeakSet()) {
+function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKeys = new Set()) {
   if (Array.isArray(value)) {
-    value.forEach((entry) => collectQueueEntries(entry, collected, seen));
+    value.forEach((entry) => collectQueueEntries(entry, collected, seen, seenKeys));
     return collected;
   }
 
@@ -512,15 +594,16 @@ function collectQueueEntries(value, collected = [], seen = new WeakSet()) {
   seen.add(value);
 
   if (isQueueEntryLike(value)) {
-    const signature = value.videoId || value.id || value.navigationEndpoint?.watchEndpoint?.videoId || value.playlistPanelVideoRenderer?.videoId || value.videoRenderer?.videoId || value.musicResponsiveListItemRenderer?.videoId || '';
-    const title = extractTextFromRuns(value.playlistPanelVideoRenderer?.title || value.videoRenderer?.title || value.musicResponsiveListItemRenderer?.title || value.title || value.titleText || value.title?.runs || value.titleText?.runs);
-    const artist = extractTextFromRuns(value.playlistPanelVideoRenderer?.longBylineText || value.videoRenderer?.longBylineText || value.musicResponsiveListItemRenderer?.longBylineText || value.longBylineText || value.shortBylineText || value.bylineText || value.authorText || value.ownerText);
-    const key = `${signature}:${title}:${artist}`.toLowerCase();
-    if (!key) {
+    const normalizedEntry = normalizeQueueItem(value);
+    if (!normalizedEntry || (!normalizedEntry.title && !normalizedEntry.artist && !normalizedEntry.videoId)) {
       return collected;
     }
-    if (!collected.some((entry) => entry.__queueKey === key)) {
-      value.__queueKey = key;
+
+    const signatures = collectQueueEntrySignatures(value, normalizedEntry);
+    const isDuplicate = signatures.some((signature) => seenKeys.has(signature));
+    if (!isDuplicate) {
+      signatures.forEach((signature) => seenKeys.add(signature));
+      value.__queueKey = signatures[0] || '';
       collected.push(value);
     }
   }
@@ -529,10 +612,96 @@ function collectQueueEntries(value, collected = [], seen = new WeakSet()) {
     if (!entry || typeof entry !== 'object') {
       return;
     }
-    collectQueueEntries(entry, collected, seen);
+    collectQueueEntries(entry, collected, seen, seenKeys);
   });
 
   return collected;
+}
+
+function collectQueueEntrySignatures(item, normalizedEntry) {
+  const signatures = [];
+  if (normalizedEntry?.videoId) {
+    signatures.push(`video:${String(normalizedEntry.videoId).toLowerCase()}`);
+  }
+
+  const titleVariants = collectQueueTitleVariants(item, normalizedEntry);
+  const artistVariants = collectQueueArtistVariants(item, normalizedEntry);
+  for (const title of titleVariants) {
+    for (const artist of artistVariants) {
+      if (title && artist) {
+        signatures.push(`title:${title.toLowerCase()}|artist:${artist.toLowerCase()}`);
+      }
+    }
+  }
+
+  if (titleVariants[0] && artistVariants[0]) {
+    signatures.push(`title:${titleVariants[0].toLowerCase()}|artist:${artistVariants[0].toLowerCase()}`);
+  }
+
+  return [...new Set(signatures.filter(Boolean))];
+}
+
+function collectQueueTitleVariants(item, normalizedEntry) {
+  const values = [];
+  const register = (value) => {
+    const text = String(value || '').trim();
+    if (text) {
+      values.push(text);
+    }
+  };
+
+  const renderer = findQueueRendererCandidate(item) || item?.playlistPanelVideoRenderer || item?.videoRenderer || item?.musicResponsiveListItemRenderer || item?.playlistPanelRenderer || null;
+  register(normalizedEntry?.title);
+  register(item?.title);
+  register(item?.titleText);
+  register(item?.displayTitle);
+  register(item?.shortTitle);
+  register(item?.songTitle);
+  register(item?.track);
+  register(item?.name);
+  register(item?.alternativeTitle);
+  register(item?.altTitle);
+  register(item?.secondaryTitle);
+  register(renderer?.title && extractTextFromRuns(renderer?.title));
+  register(renderer?.titleText && extractTextFromRuns(renderer?.titleText));
+  register(renderer?.displayTitle && extractTextFromRuns(renderer?.displayTitle));
+  register(renderer?.shortTitle && extractTextFromRuns(renderer?.shortTitle));
+  register(renderer?.songTitle && extractTextFromRuns(renderer?.songTitle));
+  register(renderer?.track && extractTextFromRuns(renderer?.track));
+  register(renderer?.name && extractTextFromRuns(renderer?.name));
+  register(renderer?.alternativeTitle && extractTextFromRuns(renderer?.alternativeTitle));
+  register(renderer?.altTitle && extractTextFromRuns(renderer?.altTitle));
+  register(renderer?.secondaryTitle && extractTextFromRuns(renderer?.secondaryTitle));
+
+  return [...new Set(values.map((value) => value.toLowerCase()))];
+}
+
+function collectQueueArtistVariants(item, normalizedEntry) {
+  const values = [];
+  const register = (value) => {
+    const text = String(value || '').trim();
+    if (text) {
+      values.push(text);
+    }
+  };
+
+  const renderer = findQueueRendererCandidate(item) || item?.playlistPanelVideoRenderer || item?.videoRenderer || item?.musicResponsiveListItemRenderer || item?.playlistPanelRenderer || null;
+  register(normalizedEntry?.artist);
+  register(item?.artist);
+  register(item?.artistName);
+  register(item?.author);
+  register(item?.channel);
+  register(renderer?.artist && extractTextFromRuns(renderer?.artist));
+  register(renderer?.artistName && extractTextFromRuns(renderer?.artistName));
+  register(renderer?.author && extractTextFromRuns(renderer?.author));
+  register(renderer?.channel && extractTextFromRuns(renderer?.channel));
+  register(renderer?.longBylineText && extractTextFromRuns(renderer?.longBylineText));
+  register(renderer?.shortBylineText && extractTextFromRuns(renderer?.shortBylineText));
+  register(renderer?.bylineText && extractTextFromRuns(renderer?.bylineText));
+  register(renderer?.authorText && extractTextFromRuns(renderer?.authorText));
+  register(renderer?.ownerText && extractTextFromRuns(renderer?.ownerText));
+
+  return [...new Set(values.map((value) => value.toLowerCase()))];
 }
 
 function normalizeQueueItem(item) {
@@ -541,10 +710,45 @@ function normalizeQueueItem(item) {
     return { title: item, artist: '', selected: false, videoId: '' };
   }
 
-  const renderer = item.playlistPanelVideoRenderer || item.videoRenderer || item.musicResponsiveListItemRenderer || item.playlistPanelRenderer || item;
-  const title = extractTextFromRuns(renderer?.title || renderer?.titleText || renderer?.title?.runs || renderer?.title?.simpleText || renderer?.titleText?.runs);
-  const artist = extractTextFromRuns(renderer?.longBylineText || renderer?.shortBylineText || renderer?.bylineText || renderer?.authorText || renderer?.ownerText);
-  const duration = extractTextFromRuns(renderer?.lengthText || renderer?.lengthText?.runs || renderer?.durationText || renderer?.durationText?.runs);
+  const renderer = findQueueRendererCandidate(item) || item.playlistPanelVideoRenderer || item.videoRenderer || item.musicResponsiveListItemRenderer || item.playlistPanelRenderer || item;
+  const titleCandidates = [
+    renderer?.title,
+    renderer?.titleText,
+    renderer?.displayTitle,
+    renderer?.shortTitle,
+    renderer?.songTitle,
+    renderer?.track,
+    renderer?.name,
+    item?.title,
+    item?.titleText,
+    item?.displayTitle,
+    item?.shortTitle,
+    item?.songTitle,
+    item?.track,
+    item?.name,
+    renderer?.alternativeTitle,
+    renderer?.altTitle,
+    renderer?.secondaryTitle,
+    item?.alternativeTitle,
+    item?.altTitle,
+    item?.secondaryTitle,
+  ];
+  const artistCandidates = [
+    renderer?.longBylineText,
+    renderer?.shortBylineText,
+    renderer?.bylineText,
+    renderer?.authorText,
+    renderer?.ownerText,
+    renderer?.artist,
+    renderer?.artistName,
+    item?.artist,
+    item?.artistName,
+    item?.author,
+    item?.channel,
+  ];
+  const title = pickPreferredText(titleCandidates);
+  const artist = normalizeBylineArtist(pickPreferredText(artistCandidates));
+  const duration = extractTextFromRuns(renderer?.lengthText || renderer?.lengthText?.runs || renderer?.durationText || renderer?.durationText?.runs || item?.duration || item?.durationText || item?.length || item?.lengthText);
   const selected = Boolean(
     renderer?.selected
     || renderer?.isSelected
@@ -581,9 +785,42 @@ function createSongIdentity(source) {
 
 function extractQueueIdentity(item) {
   if (!item) return { title: '', artist: '', videoId: '' };
-  const renderer = item.playlistPanelVideoRenderer || item.videoRenderer || item.musicResponsiveListItemRenderer || item.playlistPanelRenderer || item;
-  const title = normalizeText(extractTextFromRuns(renderer?.title || renderer?.titleText || renderer?.title?.runs || renderer?.title?.simpleText || renderer?.titleText?.runs));
-  const artist = normalizeText(extractTextFromRuns(renderer?.longBylineText || renderer?.shortBylineText || renderer?.bylineText || renderer?.authorText || renderer?.ownerText));
+  const renderer = findQueueRendererCandidate(item) || item.playlistPanelVideoRenderer || item.videoRenderer || item.musicResponsiveListItemRenderer || item.playlistPanelRenderer || item;
+  const title = normalizeText(pickPreferredText([
+    renderer?.title,
+    renderer?.titleText,
+    renderer?.displayTitle,
+    renderer?.shortTitle,
+    renderer?.songTitle,
+    renderer?.track,
+    renderer?.name,
+    item?.title,
+    item?.titleText,
+    item?.displayTitle,
+    item?.shortTitle,
+    item?.songTitle,
+    item?.track,
+    item?.name,
+    renderer?.alternativeTitle,
+    renderer?.altTitle,
+    renderer?.secondaryTitle,
+    item?.alternativeTitle,
+    item?.altTitle,
+    item?.secondaryTitle,
+  ]));
+  const artist = normalizeText(normalizeBylineArtist(pickPreferredText([
+    renderer?.longBylineText,
+    renderer?.shortBylineText,
+    renderer?.bylineText,
+    renderer?.authorText,
+    renderer?.ownerText,
+    renderer?.artist,
+    renderer?.artistName,
+    item?.artist,
+    item?.artistName,
+    item?.author,
+    item?.channel,
+  ])));
   const videoId = normalizeText(renderer?.videoId || renderer?.id || renderer?.navigationEndpoint?.watchEndpoint?.videoId || item?.videoId || item?.id || '');
   return { title, artist, videoId };
 }
@@ -786,20 +1023,10 @@ async function refreshQueueFromProxy() {
       return;
     }
 
-    if (playbackState.queue?.length) {
-      renderQueue();
-      return;
-    }
-
     playbackState.queue = [];
     renderQueue();
   } catch (err) {
     if (requestId !== queueRefreshToken) {
-      return;
-    }
-
-    if (playbackState.queue?.length) {
-      renderQueue();
       return;
     }
 
