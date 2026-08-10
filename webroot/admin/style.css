@@ -5,6 +5,8 @@
   --text: #f2f2f2;
   --muted: #8d8d8d;
   --accent: #79d6ff;
+  --control-font-size: 0.95rem;
+  --control-padding-y: 7px;
 }
 
 body {
@@ -41,11 +43,14 @@ button {
   border: 1px solid var(--border);
   margin-bottom: 8px;
   width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .now-playing__meta {
   min-width: 0;
   flex: 1;
+  width: 100%;
 }
 
 .now-playing__row {
@@ -53,19 +58,42 @@ button {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  width: 100%;
 }
 
 .now-playing__headline {
+  min-width: 0;
+  width: 100%;
+  margin-top: 6px;
   font-size: 0.95rem;
   font-weight: 700;
+  line-height: 1.2;
   color: var(--text);
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.now-playing__headline.is-marquee {
-  animation: marquee 8s linear infinite;
+.now-playing__headline > span {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  line-height: inherit;
+  overflow: hidden;
+}
+
+.now-playing__headline-track {
+  display: inline-block;
+  min-width: 100%;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
+.now-playing__headline > span.is-marquee .now-playing__headline-track {
+  width: max-content;
+  min-width: 100%;
+  padding-right: 24px;
+  text-overflow: clip;
+  animation: marquee 8s ease-in-out infinite alternate;
 }
 
 .now-playing__state {
@@ -78,10 +106,13 @@ button {
 
 .progress-row {
   margin-top: 6px;
+  width: 100%;
+  min-width: 0;
 }
 
 .progress-bar {
   width: 100%;
+  max-width: 100%;
   appearance: none;
   height: 4px;
   background: var(--panel-alt);
@@ -89,6 +120,7 @@ button {
   outline: none;
   cursor: pointer;
   padding: 0;
+  box-sizing: border-box;
 }
 
 .progress-bar::-webkit-slider-thumb {
@@ -128,15 +160,17 @@ button {
   grid-template-columns: repeat(6, 1fr);
   gap: 6px;
   margin-bottom: 8px;
+  width: 100%;
 }
 
 .control-btn {
   border: 1px solid var(--border);
   background: var(--panel-alt);
   color: var(--text);
-  padding: 7px 0;
-  font-size: 0.95rem;
+  padding: var(--control-padding-y) 0;
+  font-size: var(--control-font-size);
   font-weight: 700;
+  min-width: 0;
 }
 
 .control-btn.primary {
@@ -503,7 +537,7 @@ pre {
 
 @keyframes marquee {
   0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
+  100% { transform: translateX(calc(-1 * var(--marquee-distance, 0px))); }
 }
 
 @media (max-width: 560px) {
@@ -513,28 +547,51 @@ pre {
   }
 
   .now-playing {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .now-playing__row {
     width: 100%;
-    flex-direction: column;
-    align-items: flex-start;
   }
 
   .now-playing__state {
-    width: 100%;
-    justify-content: flex-start;
+    flex-shrink: 0;
+  }
+
+  .now-playing__headline {
+    margin-top: 4px;
   }
 
   .player-controls {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+    gap: 4px;
+  }
+
+  :root {
+    --control-font-size: 0.8rem;
+    --control-padding-y: 6px;
   }
 
   .controls,
   .url-row {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+@media (max-width: 420px) {
+  :root {
+    --control-font-size: 0.72rem;
+    --control-padding-y: 5px;
+  }
+
+  .now-playing__row {
+    gap: 6px;
+  }
+
+  .now-playing__state {
+    gap: 4px;
+    font-size: 0.78rem;
+  }
+
+  .play-state-pill,
+  .time-pill {
+    padding: 3px 5px;
   }
 }

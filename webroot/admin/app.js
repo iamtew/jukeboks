@@ -45,6 +45,7 @@ const playState = document.getElementById('playState');
 const currentTime = document.getElementById('currentTime');
 const totalTime = document.getElementById('totalTime');
 const progressBar = document.getElementById('progressBar');
+const currentHeadline = currentMeta?.parentElement || null;
 const playerButtons = {
   prev: document.getElementById('prevButton'),
   back: document.getElementById('backButton'),
@@ -401,6 +402,54 @@ function formatTime(seconds) {
   const mins = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
   const secs = String(totalSeconds % 60).padStart(2, '0');
   return `${mins}:${secs}`;
+}
+
+function getCurrentMetaTrack() {
+  if (!currentMeta) return null;
+
+  let track = currentMeta.querySelector('.now-playing__headline-track');
+  if (track) {
+    return track;
+  }
+
+  track = document.createElement('span');
+  track.className = 'now-playing__headline-track';
+  track.textContent = currentMeta.textContent || '';
+  currentMeta.textContent = '';
+  currentMeta.appendChild(track);
+  return track;
+}
+
+function setCurrentMetaText(value) {
+  const track = getCurrentMetaTrack();
+  if (!track) return;
+  track.textContent = value;
+}
+
+function getCurrentMetaText() {
+  const track = getCurrentMetaTrack();
+  return track ? track.textContent || '' : '';
+}
+
+function updateCurrentMetaMarquee() {
+  if (!currentMeta || !currentHeadline) return;
+  const currentMetaTrack = getCurrentMetaTrack();
+  if (!currentMetaTrack) return;
+
+  currentMeta.classList.remove('is-marquee');
+  currentMeta.style.removeProperty('--marquee-distance');
+
+  window.requestAnimationFrame(() => {
+    const marqueeEndPadding = 24;
+    const availableWidth = currentHeadline.clientWidth;
+    const textWidth = currentMetaTrack.scrollWidth;
+    const overflowWidth = textWidth - availableWidth;
+
+    if (overflowWidth > 4) {
+      currentMeta.style.setProperty('--marquee-distance', `${overflowWidth + marqueeEndPadding}px`);
+      currentMeta.classList.add('is-marquee');
+    }
+  });
 }
 
 function updatePlaybackButtons() {
@@ -1122,8 +1171,10 @@ function applyNowPlaying(payload) {
   }
 
   const metaText = `${playbackState.artist || 'Unknown artist'} • ${playbackState.title || 'Unknown title'}`;
-  currentMeta.textContent = metaText;
-  currentMeta.classList.toggle('is-marquee', metaText.length > 28);
+  if (getCurrentMetaText() !== metaText) {
+    setCurrentMetaText(metaText);
+    updateCurrentMetaMarquee();
+  }
   playState.textContent = playbackState.isPaused ? '⏸' : '▶';
   currentTime.textContent = formatTime(playbackState.position);
   totalTime.textContent = formatTime(playbackState.duration);
@@ -1191,8 +1242,8 @@ async function refreshNowPlayingFromProxy() {
       return;
     }
 
-    currentMeta.textContent = 'YTMD unavailable';
-    currentMeta.classList.remove('is-marquee');
+    setCurrentMetaText('YTMD unavailable');
+    updateCurrentMetaMarquee();
     playState.textContent = '⏸';
     currentTime.textContent = '00:00';
     totalTime.textContent = '00:00';
@@ -1211,7 +1262,7 @@ function connectNowPlaying() {
 
   const socket = new WebSocket(wsUrl);
   socket.onopen = () => {
-    currentMeta.textContent = 'Listening for YTMD…';
+    setCurrentMetaText('Listening for YTMD…');
     currentMeta.classList.remove('is-marquee');
     refreshNowPlayingFromProxy();
   };
@@ -1229,7 +1280,7 @@ function connectNowPlaying() {
     }
   };
   socket.onerror = () => {
-    currentMeta.textContent = 'YTMD socket unavailable';
+    setCurrentMetaText('YTMD socket unavailable');
   };
   socket.onclose = () => {
     window.setTimeout(connectNowPlaying, 2000);
@@ -1324,13 +1375,16 @@ window.setInterval(() => {
   refreshNowPlayingFromProxy();
   refreshQueueFromProxy();
 }, 10000);
+window.addEventListener('resize', updateCurrentMetaMarquee);
 window.addEventListener('focus', () => {
   refreshNowPlayingFromProxy();
   connectNowPlaying();
+  updateCurrentMetaMarquee();
 });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     refreshNowPlayingFromProxy();
     connectNowPlaying();
+    updateCurrentMetaMarquee();
   }
 });
