@@ -27,22 +27,11 @@
     isPlaybackActive: false,
   };
 
-  // Reusable timers for each marquee instance.
-  const marqueeTimers = {
-    title: { startTimer: null, cycleTimer: null },
-    artist: { startTimer: null, cycleTimer: null },
-    album: { startTimer: null, cycleTimer: null },
-  };
-
   // Timing constants for fade and marquee behavior.
   const timings = {
     fadeOutDelay: 180,
     fadeOutDuration: 600,
     fadeInDuration: 180,
-    marqueePause: 2000,
-    marqueeScrollFactor: 45,
-    marqueeMinScroll: 4,
-    marqueeMinReturn: 1.5,
   };
 
   // Enable dev mode if ?dev=true and allow host/port overrides via query params.
@@ -94,22 +83,9 @@
 
         if (data.type === "PLAYER_INFO" || data.type === "VIDEO_CHANGED") {
           if (data.song) {
-            if (data.song.artist) {
-              ui.artist.textContent = data.song.artist;
-              queueTextMarquee(ui.artist, ui.artistWrap, marqueeTimers.artist);
-            }
-
-            if (data.song.title) {
-              ui.title.textContent = data.song.title;
-              queueTextMarquee(ui.title, ui.titleWrap, marqueeTimers.title);
-            }
-
-            if (data.song.album) {
-              ui.album.textContent = data.song.album;
-              queueTextMarquee(ui.album, ui.albumWrap, marqueeTimers.album);
-            } else {
-              ui.album.textContent = "";
-            }
+            setOverlayField(ui.artist, ui.artistWrap, data.song.artist || "");
+            setOverlayField(ui.title, ui.titleWrap, data.song.title || "");
+            setOverlayField(ui.album, ui.albumWrap, data.song.album || "");
 
             if (data.song.songDuration) {
               state.songDuration = data.song.songDuration;
@@ -246,6 +222,63 @@
     output.textContent = JSON.stringify(data, null, 2);
   }
 
+  function getMarqueeTrack(textEl) {
+    if (!textEl) return null;
+
+    let track = textEl.querySelector('.overlay-marquee-track');
+    if (track) {
+      return track;
+    }
+
+    track = document.createElement('span');
+    track.className = 'overlay-marquee-track';
+    track.textContent = textEl.textContent || '';
+    textEl.textContent = '';
+    textEl.appendChild(track);
+    return track;
+  }
+
+  function setMarqueeText(textEl, value) {
+    const track = getMarqueeTrack(textEl);
+    if (!track) return false;
+
+    const nextValue = String(value || '');
+    if (track.textContent === nextValue) {
+      return false;
+    }
+
+    track.textContent = nextValue;
+    return true;
+  }
+
+  function updateTextMarquee(textEl, wrapEl) {
+    if (!textEl || !wrapEl) return;
+
+    const track = getMarqueeTrack(textEl);
+    if (!track) return;
+
+    textEl.classList.remove('is-marquee');
+    textEl.style.removeProperty('--marquee-distance');
+
+    window.requestAnimationFrame(() => {
+      const wrapWidth = wrapEl.clientWidth;
+      const textWidth = track.scrollWidth;
+      const overflowWidth = textWidth - wrapWidth;
+
+      if (overflowWidth > 4) {
+        textEl.style.setProperty('--marquee-distance', `${overflowWidth}px`);
+        textEl.classList.add('is-marquee');
+      }
+    });
+  }
+
+  function setOverlayField(textEl, wrapEl, value) {
+    const changed = setMarqueeText(textEl, value);
+    if (changed) {
+      updateTextMarquee(textEl, wrapEl);
+    }
+  }
+
   function log(obj) {
     if (!devMode) return;
     output.textContent = JSON.stringify(obj, null, 2);
@@ -280,63 +313,17 @@
     startGlowPulse();
   }
 
-  function getMarqueeWrapWidth(wrapEl) {
-    const barWidth = ui.bar.clientWidth || 500;
-    const totalTimeWidth = ui.totalTime ? ui.totalTime.offsetWidth : 0;
-    const desiredWrapWidth = barWidth + totalTimeWidth;
-    return Math.max(1, Math.min(wrapEl.parentElement.clientWidth, desiredWrapWidth));
-  }
-
-  // Reusable marquee logic for both the artist and the title.
-  function queueTextMarquee(textEl, wrapEl, timers) {
-    clearTimeout(timers.startTimer);
-    clearTimeout(timers.cycleTimer);
-
-    window.requestAnimationFrame(() => {
-      if (!textEl || !wrapEl) return;
-
-      const wrapWidth = getMarqueeWrapWidth(wrapEl);
-      wrapEl.style.width = `${wrapWidth}px`;
-
-      textEl.style.transition = "none";
-      textEl.style.transform = "translateX(0px)";
-
-      const textWidth = textEl.scrollWidth;
-      if (textWidth <= wrapWidth) {
-        return;
-      }
-
-      const offset = textWidth - wrapWidth;
-      const scrollDuration = Math.max(timings.marqueeMinScroll, offset / timings.marqueeScrollFactor);
-      const returnDuration = Math.max(timings.marqueeMinReturn, scrollDuration / 3);
-
-      timers.startTimer = window.setTimeout(() => {
-        textEl.style.transition = `transform ${scrollDuration}s linear`;
-        textEl.style.transform = `translateX(-${offset}px)`;
-
-        timers.cycleTimer = window.setTimeout(() => {
-          textEl.style.transition = `transform ${returnDuration}s linear`;
-          textEl.style.transform = "translateX(0px)";
-
-          window.setTimeout(() => {
-            queueTextMarquee(textEl, wrapEl, timers);
-          }, timings.marqueePause);
-        }, scrollDuration * 1000 + timings.marqueePause);
-      }, timings.marqueePause);
-    });
-  }
-
-  // Kick off marquee animations once the layout is ready.
+  // Measure marquee overflow once the layout is ready.
   window.requestAnimationFrame(() => {
-    queueTextMarquee(ui.title, ui.titleWrap, marqueeTimers.title);
-    queueTextMarquee(ui.artist, ui.artistWrap, marqueeTimers.artist);
-    queueTextMarquee(ui.album, ui.albumWrap, marqueeTimers.album);
+    updateTextMarquee(ui.title, ui.titleWrap);
+    updateTextMarquee(ui.artist, ui.artistWrap);
+    updateTextMarquee(ui.album, ui.albumWrap);
   });
 
   window.addEventListener("resize", () => {
-    queueTextMarquee(ui.title, ui.titleWrap, marqueeTimers.title);
-    queueTextMarquee(ui.artist, ui.artistWrap, marqueeTimers.artist);
-    queueTextMarquee(ui.album, ui.albumWrap, marqueeTimers.album);
+    updateTextMarquee(ui.title, ui.titleWrap);
+    updateTextMarquee(ui.artist, ui.artistWrap);
+    updateTextMarquee(ui.album, ui.albumWrap);
   });
 
   connect();

@@ -80,8 +80,7 @@ body.dev {
 #albumWrap {
     width: 100%;
     max-width: 100%;
-    display: flex;
-    align-items: center;
+    display: block;
     overflow: hidden;
     position: relative;
     height: 1.35em;
@@ -93,10 +92,28 @@ body.dev {
 #album {
     font-size: 1em;
     opacity: 0.9;
-    white-space: nowrap;
+    display: block;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.overlay-marquee-track {
     display: inline-block;
-    transform: translateX(0);
-    transform-origin: left center;
+    min-width: 100%;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    vertical-align: top;
+}
+
+#artist.is-marquee .overlay-marquee-track,
+#title.is-marquee .overlay-marquee-track,
+#album.is-marquee .overlay-marquee-track {
+    width: max-content;
+    min-width: 100%;
+    padding-right: 24px;
+    text-overflow: clip;
+    animation: overlay-marquee 8s ease-in-out infinite alternate;
     will-change: transform;
 }
 
@@ -111,6 +128,11 @@ body.dev {
 #album {
     font-size: 0.95em;
     opacity: 0.85;
+}
+
+@keyframes overlay-marquee {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(calc(-1 * var(--marquee-distance, 0px))); }
 }
 
 /* Progress bar */

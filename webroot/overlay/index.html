@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Now Playing Overlay</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css?v=20260810" />
 </head>
 
 <body>
@@ -18,15 +18,15 @@
 
         <div id="textBlock">
             <div id="artistWrap">
-                <div id="artist">Artist</div>
+                <div id="artist"><span class="overlay-marquee-track">Artist</span></div>
             </div>
 
             <!-- The title is animated here as a marquee when it overflows the visible area. -->
             <div id="titleWrap">
-                <div id="title">Title</div>
+                <div id="title"><span class="overlay-marquee-track">Title</span></div>
             </div>
             <div id="albumWrap">
-                <div id="album">Album</div>
+                <div id="album"><span class="overlay-marquee-track">Album</span></div>
             </div>
         </div>
     </div>
@@ -44,7 +44,7 @@
 
 <pre id="output" style="display:none;">Waiting for events...</pre>
 
-<script src="app.js"></script>
+<script src="app.js?v=20260810"></script>
 </body>
 
 </html>
