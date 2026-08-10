@@ -468,6 +468,39 @@ function normalizeBylineArtist(value) {
   return text;
 }
 
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function canonicalizeQueueTitle(title, artist = '') {
+  let normalized = String(title || '').trim();
+  if (!normalized) {
+    return '';
+  }
+
+  normalized = normalized
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[-–—:|/•]+/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  const artistText = String(artist || '').trim();
+  if (artistText) {
+    const artistPrefix = new RegExp(`^${escapeRegExp(artistText)}(?:\\s*)`, 'i');
+    normalized = normalized.replace(artistPrefix, '');
+  }
+
+  normalized = normalized
+    .replace(/\s*\((?:official|hd|music|lyric|digital)?\s*(?:video|music video|audio|lyric video|video clip)\s*\)$/i, '')
+    .replace(/\s*\[(?:official|hd|music|lyric|digital)?\s*(?:video|music video|audio|lyric video|video clip)\s*\]$/i, '')
+    .replace(/\s*[-–—:|/•]\s*(?:official|hd|music|lyric|digital)?\s*(?:video|music video|audio|lyric video|video clip)\s*$/i, '')
+    .replace(/\b(?:official|hd|music|lyric|digital)\s+(?:video|music video|audio|lyric video|video clip)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1');
+
+  return normalized.trim();
+}
+
 function pickPreferredText(values) {
   for (const value of values) {
     const text = extractTextFromRuns(value);
@@ -476,6 +509,19 @@ function pickPreferredText(values) {
     }
   }
   return '';
+}
+
+function isMeaningfulQueueText(value) {
+  const text = String(value || '').trim().toLowerCase();
+  return Boolean(text) && !['untitled', 'unknown', 'unknown title', 'unknown artist', 'n/a', 'na'].includes(text);
+}
+
+function hasMeaningfulQueueMetadata(entry) {
+  const normalized = normalizeQueueItem(entry);
+  if (!normalized) return false;
+  const title = String(normalized.title || '').trim();
+  const artist = String(normalized.artist || '').trim();
+  return isMeaningfulQueueText(title) || isMeaningfulQueueText(artist);
 }
 
 function extractQueueIndexFromContext(value, fallback = 0) {
@@ -522,19 +568,29 @@ function extractQueueIndexFromContext(value, fallback = 0) {
 }
 
 function findQueueRendererCandidate(value, seen = new WeakSet()) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!value || typeof value !== 'object') return null;
   if (seen.has(value)) return null;
   seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const resolved = findQueueRendererCandidate(entry, seen);
+      if (resolved) {
+        return resolved;
+      }
+    }
+    return null;
+  }
 
   const directKeys = ['playlistPanelVideoRenderer', 'videoRenderer', 'musicResponsiveListItemRenderer', 'playlistPanelRenderer'];
   for (const key of directKeys) {
     const candidate = value[key];
-    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) {
+    if (candidate && typeof candidate === 'object') {
       return candidate;
     }
   }
 
-  for (const key of ['primaryRenderer', 'renderer', 'playlistPanelVideoWrapperRenderer']) {
+  for (const key of ['primaryRenderer', 'renderer', 'playlistPanelVideoWrapperRenderer', 'counterpartRenderer']) {
     const candidate = value[key];
     const resolved = findQueueRendererCandidate(candidate, seen);
     if (resolved) {
@@ -543,7 +599,7 @@ function findQueueRendererCandidate(value, seen = new WeakSet()) {
   }
 
   for (const candidate of Object.values(value)) {
-    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    if (!candidate || typeof candidate !== 'object') {
       continue;
     }
     const resolved = findQueueRendererCandidate(candidate, seen);
@@ -558,10 +614,14 @@ function findQueueRendererCandidate(value, seen = new WeakSet()) {
 function isQueueEntryLike(value) {
   if (!value || typeof value !== 'object') return false;
   if (Array.isArray(value)) return false;
+
+  const directQueueKeys = ['playlistPanelVideoWrapperRenderer', 'playlistPanelVideoRenderer', 'videoRenderer', 'musicResponsiveListItemRenderer', 'playlistPanelRenderer'];
+  const hasDirectQueueShape = directQueueKeys.some((key) => Boolean(value[key]));
   const renderer = findQueueRendererCandidate(value);
-  return Boolean(
-    renderer
-    || value.title
+  const normalized = normalizeQueueItem(value);
+  const hasMeaningfulText = hasMeaningfulQueueMetadata(value);
+  const hasDirectMetadata = Boolean(
+    value.title
     || value.titleText
     || value.alternativeTitle
     || value.altTitle
@@ -572,15 +632,25 @@ function isQueueEntryLike(value) {
     || value.videoId
     || value.id
     || value.selected
+    || value.isSelected
     || value.isCurrent
     || value.current
     || value.navigationEndpoint?.watchEndpoint?.videoId
+    || value.watchEndpoint?.videoId
+  );
+
+  return Boolean(
+    hasMeaningfulText
+    || (hasDirectQueueShape && Boolean(renderer) && hasDirectMetadata)
   );
 }
 
-function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKeys = new Set()) {
+function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKeys = new Set(), queueIndex = null, treatArraysAsQueue = false) {
   if (Array.isArray(value)) {
-    value.forEach((entry) => collectQueueEntries(entry, collected, seen, seenKeys));
+    if (!treatArraysAsQueue) {
+      return collected;
+    }
+    value.forEach((entry, index) => collectQueueEntries(entry, collected, seen, seenKeys, index, false));
     return collected;
   }
 
@@ -595,16 +665,15 @@ function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKe
 
   if (isQueueEntryLike(value)) {
     const normalizedEntry = normalizeQueueItem(value);
-    if (!normalizedEntry || (!normalizedEntry.title && !normalizedEntry.artist && !normalizedEntry.videoId)) {
-      return collected;
-    }
-
-    const signatures = collectQueueEntrySignatures(value, normalizedEntry);
-    const isDuplicate = signatures.some((signature) => seenKeys.has(signature));
-    if (!isDuplicate) {
-      signatures.forEach((signature) => seenKeys.add(signature));
-      value.__queueKey = signatures[0] || '';
-      collected.push(value);
+    const hasMeaningfulText = hasMeaningfulQueueMetadata(value);
+    if (normalizedEntry && hasMeaningfulText) {
+      const signatures = collectQueueEntrySignatures(value, normalizedEntry);
+      const isDuplicate = signatures.some((signature) => seenKeys.has(signature));
+      if (!isDuplicate) {
+        signatures.forEach((signature) => seenKeys.add(signature));
+        value.__queueKey = signatures[0] || '';
+        collected.push({ item: value, queueIndex: Number.isFinite(queueIndex) ? queueIndex : 0 });
+      }
     }
   }
 
@@ -612,7 +681,7 @@ function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKe
     if (!entry || typeof entry !== 'object') {
       return;
     }
-    collectQueueEntries(entry, collected, seen, seenKeys);
+    collectQueueEntries(entry, collected, seen, seenKeys, queueIndex, false);
   });
 
   return collected;
@@ -620,7 +689,16 @@ function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKe
 
 function collectQueueEntrySignatures(item, normalizedEntry) {
   const signatures = [];
-  if (normalizedEntry?.videoId) {
+  const canonicalTitle = canonicalizeQueueTitle(normalizedEntry?.title || '', normalizedEntry?.artist || '');
+  const canonicalArtist = normalizeBylineArtist(normalizedEntry?.artist || '');
+  const titleKey = normalizeText(canonicalTitle);
+  const artistKey = normalizeText(canonicalArtist);
+
+  if (titleKey && artistKey) {
+    signatures.push(`pair:${artistKey}::${titleKey}`);
+  }
+
+  if (normalizedEntry?.videoId && (!titleKey || !artistKey)) {
     signatures.push(`video:${String(normalizedEntry.videoId).toLowerCase()}`);
   }
 
@@ -746,8 +824,9 @@ function normalizeQueueItem(item) {
     item?.author,
     item?.channel,
   ];
-  const title = pickPreferredText(titleCandidates);
-  const artist = normalizeBylineArtist(pickPreferredText(artistCandidates));
+  const rawArtistText = pickPreferredText(artistCandidates);
+  const artist = normalizeBylineArtist(rawArtistText);
+  const title = canonicalizeQueueTitle(pickPreferredText(titleCandidates), artist);
   const duration = extractTextFromRuns(renderer?.lengthText || renderer?.lengthText?.runs || renderer?.durationText || renderer?.durationText?.runs || item?.duration || item?.durationText || item?.length || item?.lengthText);
   const selected = Boolean(
     renderer?.selected
@@ -759,7 +838,14 @@ function normalizeQueueItem(item) {
     || item?.isCurrent
     || item?.current
   );
-  const videoId = renderer?.videoId || renderer?.id || renderer?.navigationEndpoint?.watchEndpoint?.videoId || item?.videoId || item?.id || '';
+  const videoId = renderer?.videoId
+    || renderer?.id
+    || renderer?.navigationEndpoint?.watchEndpoint?.videoId
+    || item?.videoId
+    || item?.id
+    || item?.navigationEndpoint?.watchEndpoint?.videoId
+    || item?.watchEndpoint?.videoId
+    || '';
 
   return {
     title: title.trim(),
@@ -786,7 +872,22 @@ function createSongIdentity(source) {
 function extractQueueIdentity(item) {
   if (!item) return { title: '', artist: '', videoId: '' };
   const renderer = findQueueRendererCandidate(item) || item.playlistPanelVideoRenderer || item.videoRenderer || item.musicResponsiveListItemRenderer || item.playlistPanelRenderer || item;
-  const title = normalizeText(pickPreferredText([
+  const artistCandidates = [
+    renderer?.longBylineText,
+    renderer?.shortBylineText,
+    renderer?.bylineText,
+    renderer?.authorText,
+    renderer?.ownerText,
+    renderer?.artist,
+    renderer?.artistName,
+    item?.artist,
+    item?.artistName,
+    item?.author,
+    item?.channel,
+  ];
+  const rawArtistText = pickPreferredText(artistCandidates);
+  const artist = normalizeText(normalizeBylineArtist(rawArtistText));
+  const title = normalizeText(canonicalizeQueueTitle(pickPreferredText([
     renderer?.title,
     renderer?.titleText,
     renderer?.displayTitle,
@@ -807,20 +908,7 @@ function extractQueueIdentity(item) {
     item?.alternativeTitle,
     item?.altTitle,
     item?.secondaryTitle,
-  ]));
-  const artist = normalizeText(normalizeBylineArtist(pickPreferredText([
-    renderer?.longBylineText,
-    renderer?.shortBylineText,
-    renderer?.bylineText,
-    renderer?.authorText,
-    renderer?.ownerText,
-    renderer?.artist,
-    renderer?.artistName,
-    item?.artist,
-    item?.artistName,
-    item?.author,
-    item?.channel,
-  ])));
+  ]), pickPreferredText(artistCandidates)));
   const videoId = normalizeText(renderer?.videoId || renderer?.id || renderer?.navigationEndpoint?.watchEndpoint?.videoId || item?.videoId || item?.id || '');
   return { title, artist, videoId };
 }
@@ -840,10 +928,13 @@ function matchesCurrentSong(normalized, currentTitle, currentArtist, currentVide
   }
 
   if (!title && !artist) return false;
-  if (title && entry.title && (entry.title === title || entry.title.includes(title) || title.includes(entry.title))) return true;
-  if (artist && entry.artist && (entry.artist === artist || entry.artist.includes(artist) || artist.includes(entry.artist))) return true;
-  if (title && artist && entry.title && entry.artist) {
-    return entry.title.includes(title) || title.includes(entry.title);
+  if (title && entry.title) {
+    const titleMatch = entry.title === title || entry.title.includes(title) || title.includes(entry.title);
+    if (titleMatch) return true;
+  }
+  if (artist && entry.artist) {
+    const artistMatch = entry.artist === artist || entry.artist.includes(artist) || artist.includes(entry.artist);
+    if (artistMatch) return true;
   }
   return false;
 }
@@ -856,10 +947,15 @@ function classifyQueueEntries(entries, currentIndex = 0, context = null) {
   const normalizedIndex = extractQueueIndexFromContext(context || entries, fallbackIndex);
 
   const normalizedEntries = entries
-    .map((entry) => {
+    .map((entry, index) => {
       const normalized = normalizeQueueItem(entry?.item || entry);
-      if (!normalized || !normalized.title) return null;
-      return normalized;
+      if (!normalized || (!normalized.title && !normalized.artist && !normalized.videoId)) return null;
+      const sourceQueueIndex = Number.isFinite(entry?.queueIndex) ? entry.queueIndex : (Number.isFinite(entry?.sourceIndex) ? entry.sourceIndex : index);
+      return {
+        ...normalized,
+        queueIndex: sourceQueueIndex,
+        sourceIndex: sourceQueueIndex,
+      };
     })
     .filter(Boolean);
 
@@ -867,31 +963,68 @@ function classifyQueueEntries(entries, currentIndex = 0, context = null) {
     return [];
   }
 
-  const currentEntry = normalizedEntries.find((entry) => {
-    if (entry.selected) return true;
-    if (entry.videoId && currentVideoId && entry.videoId.toLowerCase() === currentVideoId.toLowerCase()) return true;
-    return matchesCurrentSong(entry, currentTitle, currentArtist, currentVideoId);
+  const dedupedEntries = [];
+  const seenIdentityKeys = new Set();
+  for (const entry of normalizedEntries) {
+    const identityKey = buildQueueIdentityKey(entry);
+    if (!identityKey || seenIdentityKeys.has(identityKey)) {
+      continue;
+    }
+    seenIdentityKeys.add(identityKey);
+    dedupedEntries.push(entry);
+  }
+
+  const explicitCurrentIndex = Number.isFinite(normalizedIndex) && normalizedIndex >= 0 && normalizedIndex < dedupedEntries.length
+    ? normalizedIndex
+    : -1;
+
+  let candidateCurrentIndex = -1;
+  const currentEntry = dedupedEntries.find((entry, index) => {
+    if (entry.selected) {
+      candidateCurrentIndex = index;
+      return true;
+    }
+    if (currentVideoId && entry.videoId && entry.videoId.toLowerCase() === currentVideoId.toLowerCase()) {
+      candidateCurrentIndex = index;
+      return true;
+    }
+    if (matchesCurrentSong(entry, currentTitle, currentArtist, currentVideoId)) {
+      candidateCurrentIndex = index;
+      return true;
+    }
+    return false;
   });
 
-  const currentEntryIndex = currentEntry ? normalizedEntries.indexOf(currentEntry) : -1;
-  const resolvedCurrentIndex = currentEntryIndex >= 0 ? currentEntryIndex : normalizedIndex;
-  const fallbackCurrentIndex = currentEntryIndex >= 0 ? currentEntryIndex : (normalizedIndex >= 0 && normalizedIndex < normalizedEntries.length ? normalizedIndex : 0);
+  const currentEntryIndex = currentEntry ? dedupedEntries.indexOf(currentEntry) : -1;
+  const resolvedCurrentIndex = currentEntryIndex >= 0
+    ? currentEntryIndex
+    : (explicitCurrentIndex >= 0 ? explicitCurrentIndex : (candidateCurrentIndex >= 0 ? candidateCurrentIndex : 0));
 
-  return normalizedEntries.map((entry, index) => {
-    if (entry === currentEntry || (currentEntryIndex < 0 && index === fallbackCurrentIndex)) {
-      return { item: entry, kind: 'current', queueIndex: index };
+  return dedupedEntries.map((entry, index) => {
+    const queueIndex = Number.isFinite(entry?.sourceIndex) ? entry.sourceIndex : index;
+    if (index === resolvedCurrentIndex) {
+      return { item: entry, kind: 'current', queueIndex };
     }
 
-    if (currentEntryIndex >= 0) {
-      return index < currentEntryIndex
-        ? { item: entry, kind: 'previous', queueIndex: index }
-        : { item: entry, kind: 'next', queueIndex: index };
-    }
-
-    return index < fallbackCurrentIndex
-      ? { item: entry, kind: 'previous', queueIndex: index }
-      : { item: entry, kind: 'next', queueIndex: index };
+    return index < resolvedCurrentIndex
+      ? { item: entry, kind: 'previous', queueIndex }
+      : { item: entry, kind: 'next', queueIndex };
   });
+}
+
+function buildQueueIdentityKey(entry) {
+  const artist = normalizeBylineArtist(entry?.artist || '');
+  const title = canonicalizeQueueTitle(entry?.title || '', artist);
+  const videoId = normalizeText(entry?.videoId || '').trim();
+  const canonicalTitle = normalizeText(title).trim();
+  const canonicalArtist = normalizeText(artist).trim();
+  if (canonicalTitle || canonicalArtist) {
+    return `pair:${canonicalArtist}::${canonicalTitle}`.toLowerCase();
+  }
+  if (videoId) {
+    return `video:${videoId}`.toLowerCase();
+  }
+  return '';
 }
 
 function renderQueue() {
@@ -913,9 +1046,13 @@ function renderQueue() {
     return;
   }
 
-  const previousItems = playbackState.queue.filter((item) => item.kind === 'previous');
-  const currentItem = playbackState.queue.find((item) => item.kind === 'current');
-  const nextItems = playbackState.queue.filter((item) => item.kind === 'next');
+  const visibleQueueItems = (playbackState.queue || []).filter((item) => {
+    const normalized = normalizeQueueItem(item?.item || item);
+    return hasMeaningfulQueueMetadata(item?.item || item) && Boolean(normalized?.title || normalized?.artist);
+  });
+  const previousItems = visibleQueueItems.filter((item) => item.kind === 'previous');
+  const currentItem = visibleQueueItems.find((item) => item.kind === 'current');
+  const nextItems = visibleQueueItems.filter((item) => item.kind === 'next');
   const previousExpanded = previousItems.length > 0 ? previousQueueExpanded : false;
   if (previousItems.length === 0) {
     previousQueueExpanded = false;
@@ -923,7 +1060,7 @@ function renderQueue() {
 
   const buildItem = (item, kind) => {
     const normalized = normalizeQueueItem(item?.item || item);
-    if (!normalized) return '';
+    if (!normalized || (!normalized.title && !normalized.artist && !normalized.videoId)) return '';
     const displayText = [normalized.artist, normalized.title].filter(Boolean).join(' - ');
     const classes = [`queue-item`, kind === 'current' ? 'is-current' : '', kind === 'previous' ? 'is-previous' : ''].filter(Boolean).join(' ');
     const queueIndex = Number.isFinite(item?.queueIndex) ? item.queueIndex : '';
@@ -1008,7 +1145,7 @@ async function refreshQueueFromProxy() {
 
     const payload = await response.json();
     const queueData = payload?.data ?? payload;
-    const queueEntries = collectQueueEntries(queueData).map((entry) => ({ item: entry }));
+    const queueEntries = collectQueueEntries(queueData?.items ?? queueData?.entries ?? queueData?.contents ?? queueData?.queue ?? queueData?.content, [], new WeakSet(), new Set(), 0, true);
     const currentIndex = Number(queueData?.currentIndex ?? queueData?.index ?? queueData?.current ?? 0);
 
     if (requestId !== queueRefreshToken) {
@@ -1083,6 +1220,9 @@ function connectNowPlaying() {
       const data = JSON.parse(event.data);
       if (data?.type === 'PLAYER_INFO' || data?.type === 'VIDEO_CHANGED' || data?.type === 'PLAYER_STATE_CHANGED' || data?.type === 'POSITION_CHANGED' || data?.song || data?.position || data?.isPaused || data?.artist || data?.title) {
         applyNowPlaying(data);
+        window.setTimeout(() => {
+          refreshQueueFromProxy();
+        }, 250);
       }
     } catch (err) {
       console.error('Failed to parse YTMD socket payload', err);
@@ -1100,7 +1240,10 @@ function connectNowPlaying() {
 async function sendPlayerCommand(path) {
   try {
     await fetch(path, { method: 'POST', headers: { Accept: 'application/json' } });
-    window.setTimeout(refreshNowPlayingFromProxy, 600);
+    window.setTimeout(() => {
+      refreshNowPlayingFromProxy();
+      refreshQueueFromProxy();
+    }, 600);
   } catch (err) {
     output.textContent = `Control request failed: ${err.message}`;
   }
