@@ -324,7 +324,7 @@ function resetQueueActionButtonState(button, action) {
   if (!button) return;
   button.classList.remove('is-pending', 'is-success', 'is-error');
   button.disabled = false;
-  button.textContent = action === 'delete' ? '❎' : '⏯';
+  button.textContent = action === 'delete' ? 'X' : '⏵';
 }
 
 async function handleQueueItemAction(event) {
@@ -1118,8 +1118,8 @@ function renderQueue() {
         <div class="queue-row">
           <div class="queue-meta">${displayText || 'Untitled'}</div>
           <div class="queue-actions">
-            <button class="queue-action-btn queue-action-btn--play" type="button" data-queue-action="play" data-queue-index="${queueIndex}" aria-label="Play from queue">⏯</button>
-            <button class="queue-action-btn queue-action-btn--delete" type="button" data-queue-action="delete" data-queue-index="${queueIndex}" aria-label="Delete from queue">❎</button>
+            <button class="queue-action-btn queue-action-btn--play" type="button" data-queue-action="play" data-queue-index="${queueIndex}" aria-label="Play from queue">⏵</button>
+            <button class="queue-action-btn queue-action-btn--delete" type="button" data-queue-action="delete" data-queue-index="${queueIndex}" aria-label="Delete from queue">X</button>
           </div>
         </div>
       </div>
