@@ -192,6 +192,198 @@ button {
   padding: 8px 10px;
 }
 
+.settings-block {
+  margin-bottom: 10px;
+}
+
+.settings-json-block {
+  margin-top: 14px;
+}
+
+.settings-json-block pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.queue-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-item {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  padding: 7px 0;
+  font-size: 0.88rem;
+}
+
+.queue-item:nth-child(even) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.queue-item.is-current {
+  border-bottom-color: var(--accent);
+  background: rgba(121, 214, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(121, 214, 255, 0.24);
+}
+
+.queue-item.is-previous {
+  opacity: 0.9;
+}
+
+.queue-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.queue-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.queue-meta {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-item.is-current .queue-meta {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.queue-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.queue-action-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  color: #050505;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+
+.queue-action-btn--play {
+  background: #0ff;
+}
+
+.queue-action-btn--delete {
+  background: #f40;
+}
+
+.queue-action-btn.is-pending {
+  opacity: 0.75;
+}
+
+.queue-action-btn.is-success {
+  background: #0f0;
+  color: #050505;
+}
+
+.queue-action-btn.is-error {
+  background: #f00;
+  color: #fff;
+}
+
+.queue-feedback {
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+}
+
+.queue-feedback--success {
+  background: rgba(0, 255, 255, 0.14);
+  color: #7af7ff;
+}
+
+.queue-feedback--error {
+  background: rgba(255, 68, 0, 0.16);
+  color: #ff9b73;
+}
+
+.queue-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  margin-top: 4px;
+  font-size: 0.82rem;
+}
+
+.queue-sublist {
+  margin-top: 4px;
+  padding-left: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-sublist.is-collapsed {
+  display: none;
+}
+
+.queue-empty-state {
+  padding: 12px 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+.chip-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.chip-list button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+
 .controls {
   display: flex;
   gap: 6px;

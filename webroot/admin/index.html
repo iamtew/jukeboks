@@ -38,13 +38,21 @@
       </section>
 
       <nav class="tabs" aria-label="Admin sections">
-        <button class="tab active" data-page="system">System</button>
-        <button class="tab" data-page="skeleton">Skeleton</button>
+        <button class="tab active" data-page="queue">Queue</button>
+        <button class="tab" data-page="settings">Settings</button>
+        <button class="tab" data-page="system">API</button>
       </nav>
 
-      <section id="page-system" class="page active">
+      <section id="page-queue" class="page active">
         <div class="panel">
-          <h3>System Test Panel</h3>
+          <h3>Queue</h3>
+          <div id="queueList" class="queue-list"></div>
+        </div>
+      </section>
+
+      <section id="page-system" class="page">
+        <div class="panel">
+          <h3>API Test Panel</h3>
           <p class="muted">Run the available YTMD commands through the local server.</p>
           <div class="controls">
             <label for="commandSelect">Command</label>
@@ -77,10 +85,36 @@
         </div>
       </section>
 
-      <section id="page-skeleton" class="page">
+      <section id="page-settings" class="page">
         <div class="panel">
-          <h3>Skeleton Page</h3>
-          <p class="muted">Placeholder page ready for future controls and features.</p>
+          <h3>Settings</h3>
+          <p class="muted">Manage persistent jukeboks settings. Changes are written to jukeboks.json on disk.</p>
+          <div class="settings-block">
+            <label for="maxDurationInput">maxDuration</label>
+            <div class="url-row">
+              <input id="maxDurationInput" type="number" min="1" step="1" value="600" />
+              <button id="saveMaxDurationButton" type="button">Save</button>
+            </div>
+            <p class="muted">Maximum number of seconds a song request can be.</p>
+          </div>
+          <div class="settings-block">
+            <label for="blacklistInput">Add blacklist entry</label>
+            <div class="url-row">
+              <input id="blacklistInput" type="text" placeholder="Artist or title" />
+              <button id="addBlacklistButton" type="button">Add</button>
+            </div>
+          </div>
+          <div class="settings-block">
+            <h4>Blacklist</h4>
+            <p class="muted">This list blocks songs or artists from being queued or played.</p>
+            <p class="muted" id="configPathLabel">Config file: jukeboks.json</p>
+            <ul id="blacklistList" class="chip-list"></ul>
+          </div>
+          <div class="settings-block settings-json-block">
+            <h4>Settings JSON</h4>
+            <p class="muted">This is the current persisted configuration payload written to jukeboks.json.</p>
+            <pre id="settingsOutput">Loading settings…</pre>
+          </div>
         </div>
       </section>
     </main>

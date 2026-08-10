@@ -32,6 +32,14 @@ const copyButton = document.getElementById('copyUrl');
 const tabs = document.querySelectorAll('.tab');
 const pages = document.querySelectorAll('.page');
 const tableBody = document.getElementById('commandTableBody');
+const queueList = document.getElementById('queueList');
+const blacklistInput = document.getElementById('blacklistInput');
+const addBlacklistButton = document.getElementById('addBlacklistButton');
+const blacklistList = document.getElementById('blacklistList');
+const settingsOutput = document.getElementById('settingsOutput');
+const configPathLabel = document.getElementById('configPathLabel');
+const maxDurationInput = document.getElementById('maxDurationInput');
+const saveMaxDurationButton = document.getElementById('saveMaxDurationButton');
 const currentMeta = document.getElementById('currentMeta');
 const playState = document.getElementById('playState');
 const currentTime = document.getElementById('currentTime');
@@ -146,6 +154,103 @@ tabs.forEach((tab) => {
   });
 });
 
+async function loadSettings() {
+  try {
+    const response = await fetch('/api/config');
+    const payload = await response.json();
+    if (!response.ok || payload.exitCode !== 0) {
+      throw new Error(payload.message || 'Unable to load settings');
+    }
+    renderBlacklist(payload.data?.blacklist || []);
+    configPathLabel.textContent = 'Config file: jukeboks.json';
+    if (Number.isFinite(payload.data?.maxDuration)) {
+      maxDurationInput.value = String(payload.data.maxDuration);
+    }
+    settingsOutput.textContent = JSON.stringify(payload.data || {}, null, 2);
+  } catch (err) {
+    settingsOutput.textContent = `Failed to load settings: ${err.message}`;
+  }
+}
+
+function getCurrentBlacklist() {
+  return Array.from(blacklistList.querySelectorAll('li[data-entry]')).map((item) => item.dataset.entry || '');
+}
+
+function renderBlacklist(items) {
+  blacklistList.innerHTML = '';
+  if (!items.length) {
+    const item = document.createElement('li');
+    item.textContent = 'No blacklist entries yet';
+    blacklistList.appendChild(item);
+    return;
+  }
+
+  items.forEach((entry) => {
+    const item = document.createElement('li');
+    item.dataset.entry = entry;
+    item.innerHTML = `<span>${entry}</span><button type="button" aria-label="Remove ${entry}">✕</button>`;
+    blacklistList.appendChild(item);
+  });
+
+  blacklistList.querySelectorAll('button').forEach((button) => {
+    button.addEventListener('click', () => removeBlacklistEntry(button.closest('li')?.dataset.entry || ''));
+  });
+}
+
+async function saveSettings(blacklist, maxDuration = Number(maxDurationInput.value) || 600) {
+  const response = await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ blacklist: blacklist.filter(Boolean), maxDuration }),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.exitCode !== 0) {
+    throw new Error(payload.message || 'Unable to save settings');
+  }
+  settingsOutput.textContent = `Saved settings\n${JSON.stringify(payload.data || {}, null, 2)}`;
+  renderBlacklist(payload.data?.blacklist || []);
+}
+
+async function addBlacklistEntry() {
+  const value = blacklistInput.value.trim();
+  if (!value) return;
+  const current = getCurrentBlacklist();
+  const next = [...new Set([...current, value])];
+  blacklistInput.value = '';
+  try {
+    await saveSettings(next);
+  } catch (err) {
+    settingsOutput.textContent = `Failed to save settings: ${err.message}`;
+  }
+}
+
+async function removeBlacklistEntry(value) {
+  const current = getCurrentBlacklist();
+  const next = current.filter((entry) => entry !== value);
+  try {
+    await saveSettings(next);
+  } catch (err) {
+    settingsOutput.textContent = `Failed to save settings: ${err.message}`;
+  }
+}
+
+addBlacklistButton.addEventListener('click', addBlacklistEntry);
+blacklistInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    addBlacklistEntry();
+  }
+});
+
+saveMaxDurationButton.addEventListener('click', async () => {
+  try {
+    const blacklist = getCurrentBlacklist();
+    await saveSettings(blacklist, Number(maxDurationInput.value) || 600);
+  } catch (err) {
+    settingsOutput.textContent = `Failed to save settings: ${err.message}`;
+  }
+});
+
 runButton.addEventListener('click', runCommand);
 copyButton.addEventListener('click', async () => {
   try {
@@ -164,8 +269,132 @@ let playbackState = {
   duration: 0,
   title: '',
   artist: '',
+  videoId: '',
   hasSong: false,
+  queue: [],
 };
+let queueRefreshToken = 0;
+let nowPlayingRefreshToken = 0;
+let previousQueueExpanded = false;
+let previousQueueRendered = false;
+let queueActionFeedback = null;
+let queueActionFeedbackTimer = null;
+
+function setPreviousQueueExpanded(expanded, button = null, sublist = null) {
+  previousQueueExpanded = Boolean(expanded);
+  if (button) {
+    button.textContent = previousQueueExpanded ? 'Hide previous' : 'Previous…';
+    button.setAttribute('aria-expanded', previousQueueExpanded ? 'true' : 'false');
+  }
+  if (sublist) {
+    sublist.classList.toggle('is-collapsed', !previousQueueExpanded);
+    sublist.hidden = !previousQueueExpanded;
+    sublist.setAttribute('data-expanded', previousQueueExpanded ? 'true' : 'false');
+  }
+}
+
+function handleQueueToggle(event) {
+  const button = event.target.closest('[data-toggle="previous"]');
+  if (!button) return;
+  const sublist = button.parentElement?.querySelector('[data-previous-list]');
+  if (!sublist) return;
+  event.preventDefault();
+  setPreviousQueueExpanded(sublist.hidden, button, sublist);
+}
+
+function shouldHandleQueueAction(event) {
+  return Boolean(event.target.closest('[data-queue-action]'));
+}
+
+function setQueueActionFeedback(message, kind = 'success') {
+  queueActionFeedback = { message, kind };
+  renderQueue();
+
+  if (queueActionFeedbackTimer) {
+    window.clearTimeout(queueActionFeedbackTimer);
+  }
+  queueActionFeedbackTimer = window.setTimeout(() => {
+    queueActionFeedback = null;
+    renderQueue();
+  }, 1400);
+}
+
+function resetQueueActionButtonState(button, action) {
+  if (!button) return;
+  button.classList.remove('is-pending', 'is-success', 'is-error');
+  button.disabled = false;
+  button.textContent = action === 'delete' ? '❎' : '⏯';
+}
+
+async function handleQueueItemAction(event) {
+  const button = event.target.closest('[data-queue-action]');
+  if (!button) return;
+
+  const action = button.dataset.queueAction;
+  const queueIndex = Number(button.dataset.queueIndex);
+  if (!Number.isFinite(queueIndex)) return;
+
+  event.preventDefault();
+
+  button.classList.add('is-pending');
+  button.disabled = true;
+  button.textContent = '…';
+
+  const path = action === 'delete'
+    ? `/cmd/ytmd/queue/${queueIndex}/delete`
+    : '/cmd/ytmd/queue/patch';
+  const method = action === 'delete' ? 'DELETE' : 'PATCH';
+  const init = {
+    method,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+  };
+
+  if (action !== 'delete') {
+    init.body = JSON.stringify({ index: queueIndex });
+  }
+
+  try {
+    const response = await fetch(path, init);
+    if (!response.ok) {
+      throw new Error(`status ${response.status}`);
+    }
+
+    button.classList.remove('is-pending');
+    button.classList.add('is-success');
+    button.textContent = '✓';
+    setQueueActionFeedback(action === 'delete' ? 'Deleted queue item' : 'Started queue item', 'success');
+
+    if (action !== 'delete') {
+      playbackState.queue = classifyQueueEntries(playbackState.queue, queueIndex, playbackState.queue);
+      renderQueue();
+    }
+
+    window.setTimeout(() => {
+      refreshQueueFromProxy();
+      refreshNowPlayingFromProxy();
+    }, 700);
+  } catch (err) {
+    button.classList.remove('is-pending');
+    button.classList.add('is-error');
+    button.textContent = '!';
+    setQueueActionFeedback(action === 'delete' ? 'Unable to delete queue item' : 'Unable to start queue item', 'error');
+    console.error('Queue action failed', err);
+  } finally {
+    window.setTimeout(() => {
+      resetQueueActionButtonState(button, action);
+    }, 900);
+  }
+}
+
+if (queueList) {
+  queueList.addEventListener('click', (event) => {
+    if (shouldHandleQueueAction(event)) {
+      handleQueueItemAction(event);
+      return;
+    }
+    handleQueueToggle(event);
+  });
+}
 
 function formatTime(seconds) {
   const totalSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
@@ -188,6 +417,312 @@ function updateProgressBar() {
   totalTime.textContent = formatTime(playbackState.duration);
 }
 
+function extractTextFromRuns(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => extractTextFromRuns(entry)).filter(Boolean).join('');
+  }
+  if (typeof value === 'object') {
+    if (Array.isArray(value.runs)) {
+      return value.runs.map((entry) => extractTextFromRuns(entry)).filter(Boolean).join('');
+    }
+    if (typeof value.text === 'string') {
+      return value.text;
+    }
+  }
+  return '';
+}
+
+function extractQueueIndexFromContext(value, fallback = 0) {
+  if (!value || typeof value !== 'object') {
+    return fallback;
+  }
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const resolved = extractQueueIndexFromContext(entry, fallback);
+      if (resolved !== fallback) {
+        return resolved;
+      }
+    }
+    return fallback;
+  }
+
+  const candidates = [
+    value.currentIndex,
+    value.index,
+    value.current,
+    value.selectedIndex,
+    value.position,
+  ];
+
+  for (const candidate of candidates) {
+    const num = Number(candidate);
+    if (Number.isFinite(num) && num >= 0) {
+      return num;
+    }
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === 'currentIndex' || key === 'index' || key === 'current' || key === 'selectedIndex' || key === 'position') {
+      continue;
+    }
+    const resolved = extractQueueIndexFromContext(entry, fallback);
+    if (resolved !== fallback) {
+      return resolved;
+    }
+  }
+
+  return fallback;
+}
+
+function isQueueEntryLike(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return false;
+  const renderer = value.playlistPanelVideoRenderer || value.videoRenderer || value.musicResponsiveListItemRenderer || value.playlistPanelRenderer;
+  return Boolean(
+    renderer
+    || value.title
+    || value.titleText
+    || value.longBylineText
+    || value.shortBylineText
+    || value.videoId
+    || value.id
+    || value.selected
+    || value.isCurrent
+    || value.current
+    || value.navigationEndpoint?.watchEndpoint?.videoId
+  );
+}
+
+function collectQueueEntries(value, collected = [], seen = new WeakSet()) {
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectQueueEntries(entry, collected, seen));
+    return collected;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return collected;
+  }
+
+  if (seen.has(value)) {
+    return collected;
+  }
+  seen.add(value);
+
+  if (isQueueEntryLike(value)) {
+    const signature = value.videoId || value.id || value.navigationEndpoint?.watchEndpoint?.videoId || value.playlistPanelVideoRenderer?.videoId || value.videoRenderer?.videoId || value.musicResponsiveListItemRenderer?.videoId || '';
+    const title = extractTextFromRuns(value.playlistPanelVideoRenderer?.title || value.videoRenderer?.title || value.musicResponsiveListItemRenderer?.title || value.title || value.titleText || value.title?.runs || value.titleText?.runs);
+    const artist = extractTextFromRuns(value.playlistPanelVideoRenderer?.longBylineText || value.videoRenderer?.longBylineText || value.musicResponsiveListItemRenderer?.longBylineText || value.longBylineText || value.shortBylineText || value.bylineText || value.authorText || value.ownerText);
+    const key = `${signature}:${title}:${artist}`.toLowerCase();
+    if (!key) {
+      return collected;
+    }
+    if (!collected.some((entry) => entry.__queueKey === key)) {
+      value.__queueKey = key;
+      collected.push(value);
+    }
+  }
+
+  Object.values(value).forEach((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return;
+    }
+    collectQueueEntries(entry, collected, seen);
+  });
+
+  return collected;
+}
+
+function normalizeQueueItem(item) {
+  if (!item) return null;
+  if (typeof item === 'string') {
+    return { title: item, artist: '', selected: false, videoId: '' };
+  }
+
+  const renderer = item.playlistPanelVideoRenderer || item.videoRenderer || item.musicResponsiveListItemRenderer || item.playlistPanelRenderer || item;
+  const title = extractTextFromRuns(renderer?.title || renderer?.titleText || renderer?.title?.runs || renderer?.title?.simpleText || renderer?.titleText?.runs);
+  const artist = extractTextFromRuns(renderer?.longBylineText || renderer?.shortBylineText || renderer?.bylineText || renderer?.authorText || renderer?.ownerText);
+  const duration = extractTextFromRuns(renderer?.lengthText || renderer?.lengthText?.runs || renderer?.durationText || renderer?.durationText?.runs);
+  const selected = Boolean(
+    renderer?.selected
+    || renderer?.isSelected
+    || renderer?.isCurrent
+    || renderer?.current
+    || item?.selected
+    || item?.isSelected
+    || item?.isCurrent
+    || item?.current
+  );
+  const videoId = renderer?.videoId || renderer?.id || renderer?.navigationEndpoint?.watchEndpoint?.videoId || item?.videoId || item?.id || '';
+
+  return {
+    title: title.trim(),
+    artist: artist.trim(),
+    duration: duration.trim(),
+    selected,
+    videoId,
+    rawItem: item,
+  };
+}
+
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function createSongIdentity(source) {
+  if (!source) return { title: '', artist: '', videoId: '' };
+  const title = normalizeText(source.title || source.name || source.track || source.songTitle || '');
+  const artist = normalizeText(source.artist || source.artistName || source.channel || source.author || source.songArtist || '');
+  const videoId = normalizeText(source.videoId || source.id || source.video?.id || source.url || '');
+  return { title, artist, videoId };
+}
+
+function extractQueueIdentity(item) {
+  if (!item) return { title: '', artist: '', videoId: '' };
+  const renderer = item.playlistPanelVideoRenderer || item.videoRenderer || item.musicResponsiveListItemRenderer || item.playlistPanelRenderer || item;
+  const title = normalizeText(extractTextFromRuns(renderer?.title || renderer?.titleText || renderer?.title?.runs || renderer?.title?.simpleText || renderer?.titleText?.runs));
+  const artist = normalizeText(extractTextFromRuns(renderer?.longBylineText || renderer?.shortBylineText || renderer?.bylineText || renderer?.authorText || renderer?.ownerText));
+  const videoId = normalizeText(renderer?.videoId || renderer?.id || renderer?.navigationEndpoint?.watchEndpoint?.videoId || item?.videoId || item?.id || '');
+  return { title, artist, videoId };
+}
+
+function matchesCurrentSong(normalized, currentTitle, currentArtist, currentVideoId) {
+  if (!normalized) return false;
+  const entry = extractQueueIdentity(normalized.rawItem || normalized.item || normalized);
+  const title = normalizeText(currentTitle);
+  const artist = normalizeText(currentArtist);
+  const videoId = normalizeText(currentVideoId);
+  const selected = Boolean(normalized.selected || normalized.rawItem?.selected || normalized.rawItem?.isCurrent || normalized.rawItem?.current || normalized.item?.selected || normalized.item?.isCurrent || normalized.item?.current);
+
+  if (selected) return true;
+
+  if (videoId && entry.videoId) {
+    if (entry.videoId === videoId) return true;
+  }
+
+  if (!title && !artist) return false;
+  if (title && entry.title && (entry.title === title || entry.title.includes(title) || title.includes(entry.title))) return true;
+  if (artist && entry.artist && (entry.artist === artist || entry.artist.includes(artist) || artist.includes(entry.artist))) return true;
+  if (title && artist && entry.title && entry.artist) {
+    return entry.title.includes(title) || title.includes(entry.title);
+  }
+  return false;
+}
+
+function classifyQueueEntries(entries, currentIndex = 0, context = null) {
+  const currentTitle = playbackState.title || '';
+  const currentArtist = playbackState.artist || '';
+  const currentVideoId = playbackState.videoId || '';
+  const fallbackIndex = Number.isFinite(currentIndex) && currentIndex >= 0 ? currentIndex : 0;
+  const normalizedIndex = extractQueueIndexFromContext(context || entries, fallbackIndex);
+
+  const normalizedEntries = entries
+    .map((entry) => {
+      const normalized = normalizeQueueItem(entry?.item || entry);
+      if (!normalized || !normalized.title) return null;
+      return normalized;
+    })
+    .filter(Boolean);
+
+  if (normalizedEntries.length === 0) {
+    return [];
+  }
+
+  const currentEntry = normalizedEntries.find((entry) => {
+    if (entry.selected) return true;
+    if (entry.videoId && currentVideoId && entry.videoId.toLowerCase() === currentVideoId.toLowerCase()) return true;
+    return matchesCurrentSong(entry, currentTitle, currentArtist, currentVideoId);
+  });
+
+  const currentEntryIndex = currentEntry ? normalizedEntries.indexOf(currentEntry) : -1;
+  const resolvedCurrentIndex = currentEntryIndex >= 0 ? currentEntryIndex : normalizedIndex;
+  const fallbackCurrentIndex = currentEntryIndex >= 0 ? currentEntryIndex : (normalizedIndex >= 0 && normalizedIndex < normalizedEntries.length ? normalizedIndex : 0);
+
+  return normalizedEntries.map((entry, index) => {
+    if (entry === currentEntry || (currentEntryIndex < 0 && index === fallbackCurrentIndex)) {
+      return { item: entry, kind: 'current', queueIndex: index };
+    }
+
+    if (currentEntryIndex >= 0) {
+      return index < currentEntryIndex
+        ? { item: entry, kind: 'previous', queueIndex: index }
+        : { item: entry, kind: 'next', queueIndex: index };
+    }
+
+    return index < fallbackCurrentIndex
+      ? { item: entry, kind: 'previous', queueIndex: index }
+      : { item: entry, kind: 'next', queueIndex: index };
+  });
+}
+
+function renderQueue() {
+  if (!queueList) return;
+
+  const isPaused = Boolean(playbackState.hasSong && playbackState.isPaused);
+
+  const feedbackMarkup = queueActionFeedback
+    ? `<div class="queue-feedback queue-feedback--${queueActionFeedback.kind}">${queueActionFeedback.message}</div>`
+    : '';
+
+  if (isPaused) {
+    queueList.innerHTML = `${feedbackMarkup}<div class="queue-empty-state">Queue unavailable while the player is Paused.</div>`;
+    return;
+  }
+
+  if (!playbackState.queue?.length) {
+    queueList.innerHTML = `${feedbackMarkup}<div class="queue-empty-state">Queue telemetry unavailable. Awaiting playback activity.</div>`;
+    return;
+  }
+
+  const previousItems = playbackState.queue.filter((item) => item.kind === 'previous');
+  const currentItem = playbackState.queue.find((item) => item.kind === 'current');
+  const nextItems = playbackState.queue.filter((item) => item.kind === 'next');
+  const previousExpanded = previousItems.length > 0 ? previousQueueExpanded : false;
+  if (previousItems.length === 0) {
+    previousQueueExpanded = false;
+  }
+
+  const buildItem = (item, kind) => {
+    const normalized = normalizeQueueItem(item?.item || item);
+    if (!normalized) return '';
+    const displayText = [normalized.artist, normalized.title].filter(Boolean).join(' - ');
+    const classes = [`queue-item`, kind === 'current' ? 'is-current' : '', kind === 'previous' ? 'is-previous' : ''].filter(Boolean).join(' ');
+    const queueIndex = Number.isFinite(item?.queueIndex) ? item.queueIndex : '';
+    return `
+      <div class="${classes}">
+        <div class="queue-row">
+          <div class="queue-meta">${displayText || 'Untitled'}</div>
+          <div class="queue-actions">
+            <button class="queue-action-btn queue-action-btn--play" type="button" data-queue-action="play" data-queue-index="${queueIndex}" aria-label="Play from queue">⏯</button>
+            <button class="queue-action-btn queue-action-btn--delete" type="button" data-queue-action="delete" data-queue-index="${queueIndex}" aria-label="Delete from queue">❎</button>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  const previousMarkup = previousItems.length > 0
+    ? `
+      <div class="queue-item is-previous">
+        <button class="queue-toggle" type="button" data-toggle="previous" aria-expanded="${previousExpanded ? 'true' : 'false'}">${previousExpanded ? 'Hide previous' : 'Previous…'}</button>
+        <div class="queue-sublist${previousExpanded ? '' : ' is-collapsed'}" data-previous-list ${previousExpanded ? '' : 'hidden'}>
+          ${previousItems.map((entry) => buildItem(entry, 'previous')).join('')}
+        </div>
+      </div>
+    `
+    : '';
+  previousQueueRendered = previousItems.length > 0;
+
+  const currentMarkup = currentItem ? buildItem(currentItem, 'current') : '<div class="queue-item"><div class="queue-meta">No current song.</div></div>';
+  const nextMarkup = nextItems.length > 0
+    ? nextItems.map((entry) => buildItem(entry, 'next')).join('')
+    : '<div class="queue-item"><div class="queue-meta">No upcoming songs.</div></div>';
+
+  queueList.innerHTML = `${feedbackMarkup}${previousMarkup}${currentMarkup}${nextMarkup}`;
+}
+
 function applyNowPlaying(payload) {
   const source = payload?.song ?? payload?.data?.song ?? payload?.data ?? payload;
   const song = source?.song ?? source;
@@ -200,6 +735,7 @@ function applyNowPlaying(payload) {
   const duration = Number(source?.songDuration ?? song?.songDuration ?? song?.duration ?? song?.length ?? 0);
   const nextTitle = song?.title || song?.name || song?.track || source?.title || source?.name || '';
   const nextArtist = song?.artist || song?.artistName || song?.channel || song?.author || source?.artist || source?.artistName || '';
+  const nextVideoId = song?.videoId || song?.id || source?.videoId || source?.id || source?.video?.id || '';
 
   if (nextTitle || nextArtist || duration || position || typeof source?.isPaused === 'boolean' || typeof song?.isPaused === 'boolean' || typeof song?.isPlaying === 'boolean') {
     playbackState.hasSong = true;
@@ -208,6 +744,7 @@ function applyNowPlaying(payload) {
     playbackState.duration = duration || playbackState.duration;
     playbackState.title = nextTitle || playbackState.title;
     playbackState.artist = nextArtist || playbackState.artist;
+    playbackState.videoId = nextVideoId || playbackState.videoId;
   }
 
   const metaText = `${playbackState.artist || 'Unknown artist'} • ${playbackState.title || 'Unknown title'}`;
@@ -218,9 +755,61 @@ function applyNowPlaying(payload) {
   totalTime.textContent = formatTime(playbackState.duration);
   updatePlaybackButtons();
   updateProgressBar();
+  if (playbackState.queue?.length) {
+    playbackState.queue = classifyQueueEntries(playbackState.queue, 0, playbackState.queue);
+    renderQueue();
+  }
+}
+
+async function refreshQueueFromProxy() {
+  const requestId = ++queueRefreshToken;
+  try {
+    const response = await fetch('/cmd/ytmd/queue/get', { headers: { Accept: 'application/json' } });
+    if (!response.ok) {
+      throw new Error(`status ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const queueData = payload?.data ?? payload;
+    const queueEntries = collectQueueEntries(queueData).map((entry) => ({ item: entry }));
+    const currentIndex = Number(queueData?.currentIndex ?? queueData?.index ?? queueData?.current ?? 0);
+
+    if (requestId !== queueRefreshToken) {
+      return;
+    }
+
+    const hasMeaningfulQueuePayload = queueEntries.length > 0 || (queueData && typeof queueData === 'object' && (Array.isArray(queueData.items) || Array.isArray(queueData.entries) || Array.isArray(queueData.contents) || Array.isArray(queueData.queue) || Array.isArray(queueData.content)));
+
+    if (hasMeaningfulQueuePayload && queueEntries.length > 0) {
+      playbackState.queue = classifyQueueEntries(queueEntries, currentIndex, queueData);
+      renderQueue();
+      return;
+    }
+
+    if (playbackState.queue?.length) {
+      renderQueue();
+      return;
+    }
+
+    playbackState.queue = [];
+    renderQueue();
+  } catch (err) {
+    if (requestId !== queueRefreshToken) {
+      return;
+    }
+
+    if (playbackState.queue?.length) {
+      renderQueue();
+      return;
+    }
+
+    playbackState.queue = [];
+    renderQueue();
+  }
 }
 
 async function refreshNowPlayingFromProxy() {
+  const requestId = ++nowPlayingRefreshToken;
   try {
     const response = await fetch('/cmd/ytmd/song/get', { headers: { Accept: 'application/json' } });
     if (!response.ok) {
@@ -228,8 +817,16 @@ async function refreshNowPlayingFromProxy() {
     }
 
     const payload = await response.json();
+    if (requestId !== nowPlayingRefreshToken) {
+      return;
+    }
+
     applyNowPlaying(payload);
   } catch (err) {
+    if (requestId !== nowPlayingRefreshToken) {
+      return;
+    }
+
     currentMeta.textContent = 'YTMD unavailable';
     currentMeta.classList.remove('is-marquee');
     playState.textContent = '⏸';
@@ -349,9 +946,14 @@ progressBar.addEventListener('change', async () => {
 });
 
 renderCommands();
+loadSettings();
 refreshNowPlayingFromProxy();
+refreshQueueFromProxy();
 connectNowPlaying();
-window.setInterval(refreshNowPlayingFromProxy, 10000);
+window.setInterval(() => {
+  refreshNowPlayingFromProxy();
+  refreshQueueFromProxy();
+}, 10000);
 window.addEventListener('focus', () => {
   refreshNowPlayingFromProxy();
   connectNowPlaying();
