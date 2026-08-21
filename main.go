@@ -152,7 +152,7 @@ func listenWithFallback(port string) (net.Listener, string, error) {
 
 	for attempt := 0; attempt < 10; attempt++ {
 		candidatePort := basePort + attempt
-		listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", candidatePort))
+		listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", candidatePort))
 		if err == nil {
 			if candidatePort != basePort {
 				fmt.Printf("port %d was busy, using %d instead\n", basePort, candidatePort)
