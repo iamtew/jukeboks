@@ -63,6 +63,25 @@ func collectQueueEntriesForCommand(payload any) []queueEntrySummary {
 		return nil
 	}
 
+	if ordered := orderedQueueItemsArray(payload); ordered != nil {
+		collected := make([]queueEntrySummary, 0, len(ordered))
+		for _, item := range ordered {
+			typed, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if !isQueueEntryLikeForCommand(typed) {
+				continue
+			}
+			entry := summarizeQueueEntry(typed)
+			if entry.Title == "" && entry.Artist == "" && entry.VideoID == "" {
+				continue
+			}
+			collected = append(collected, entry)
+		}
+		return collected
+	}
+
 	queueCandidates := []any{}
 	var collectCandidates func(any)
 	collectCandidates = func(value any) {
@@ -139,6 +158,25 @@ func collectQueueEntriesForCommand(payload any) []queueEntrySummary {
 	return collected
 }
 
+func orderedQueueItemsArray(payload any) []any {
+	switch typed := payload.(type) {
+	case []any:
+		return typed
+	case map[string]any:
+		if nested, ok := typed["data"].(map[string]any); ok {
+			if items := orderedQueueItemsArray(nested); items != nil {
+				return items
+			}
+		}
+		for _, key := range []string{"items", "entries", "contents", "content", "queue"} {
+			if items, ok := typed[key].([]any); ok {
+				return items
+			}
+		}
+	}
+	return nil
+}
+
 type queueEntrySummary struct {
 	Title           string
 	Artist          string
@@ -178,22 +216,28 @@ func reorderQueueEntriesFromCurrentSong(entries []queueEntrySummary, songData ma
 	}
 
 	currentIndex := -1
-	for idx, entry := range entries {
-		if currentVideoID != "" && strings.EqualFold(entry.VideoID, currentVideoID) {
-			currentIndex = idx
-			break
+	if currentVideoID != "" {
+		for idx := len(entries) - 1; idx >= 0; idx-- {
+			if strings.EqualFold(entries[idx].VideoID, currentVideoID) {
+				currentIndex = idx
+				break
+			}
 		}
-		if currentTitle != "" && strings.EqualFold(entry.Title, currentTitle) {
-			currentIndex = idx
-			break
+	}
+	if currentIndex < 0 && currentTitle != "" && currentArtist != "" {
+		for idx, entry := range entries {
+			if strings.EqualFold(entry.Title, currentTitle) && strings.EqualFold(entry.Artist, currentArtist) {
+				currentIndex = idx
+				break
+			}
 		}
-		if currentArtist != "" && strings.EqualFold(entry.Artist, currentArtist) && currentTitle != "" && strings.EqualFold(entry.Title, currentTitle) {
-			currentIndex = idx
-			break
-		}
-		if currentArtist != "" && strings.EqualFold(entry.Artist, currentArtist) {
-			currentIndex = idx
-			break
+	}
+	if currentIndex < 0 && currentTitle != "" && currentArtist == "" {
+		for idx, entry := range entries {
+			if strings.EqualFold(entry.Title, currentTitle) {
+				currentIndex = idx
+				break
+			}
 		}
 	}
 

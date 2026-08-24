@@ -243,9 +243,46 @@ button {
   word-break: break-word;
 }
 
+.queue-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.queue-toolbar h3 {
+  margin: 0;
+}
+
+.queue-toolbar-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.queue-toolbar-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.queue-toolbar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .queue-list {
   display: flex;
   flex-direction: column;
+}
+
+.queue-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .queue-item {

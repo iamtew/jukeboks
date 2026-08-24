@@ -33,6 +33,7 @@ const tabs = document.querySelectorAll('.tab');
 const pages = document.querySelectorAll('.page');
 const tableBody = document.getElementById('commandTableBody');
 const queueList = document.getElementById('queueList');
+const clearQueueButton = document.getElementById('clearQueueButton');
 const blacklistInput = document.getElementById('blacklistInput');
 const addBlacklistButton = document.getElementById('addBlacklistButton');
 const blacklistList = document.getElementById('blacklistList');
@@ -273,6 +274,7 @@ let playbackState = {
   videoId: '',
   hasSong: false,
   queue: [],
+  queueStatus: 'empty', // ok | empty | error | unavailable
 };
 let queueRefreshToken = 0;
 let nowPlayingRefreshToken = 0;
@@ -280,6 +282,26 @@ let previousQueueExpanded = false;
 let previousQueueRendered = false;
 let queueActionFeedback = null;
 let queueActionFeedbackTimer = null;
+
+async function readCommandEnvelope(response) {
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_) {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message = payload?.message || `status ${response.status}`;
+    throw new Error(message);
+  }
+
+  if (payload && typeof payload.exitCode === 'number' && payload.exitCode !== 0) {
+    throw new Error(payload.message || 'Command failed');
+  }
+
+  return payload;
+}
 
 function setPreviousQueueExpanded(expanded, button = null, sublist = null) {
   previousQueueExpanded = Boolean(expanded);
@@ -355,10 +377,7 @@ async function handleQueueItemAction(event) {
   }
 
   try {
-    const response = await fetch(path, init);
-    if (!response.ok) {
-      throw new Error(`status ${response.status}`);
-    }
+    await readCommandEnvelope(await fetch(path, init));
 
     button.classList.remove('is-pending');
     button.classList.add('is-success');
@@ -378,12 +397,40 @@ async function handleQueueItemAction(event) {
     button.classList.remove('is-pending');
     button.classList.add('is-error');
     button.textContent = '!';
-    setQueueActionFeedback(action === 'delete' ? 'Unable to delete queue item' : 'Unable to start queue item', 'error');
+    setQueueActionFeedback(err?.message || (action === 'delete' ? 'Unable to delete queue item' : 'Unable to start queue item'), 'error');
     console.error('Queue action failed', err);
   } finally {
     window.setTimeout(() => {
       resetQueueActionButtonState(button, action);
     }, 900);
+  }
+}
+
+async function handleClearQueue() {
+  if (!clearQueueButton) return;
+  if (!window.confirm('Clear the entire YTMD queue?')) {
+    return;
+  }
+
+  clearQueueButton.disabled = true;
+  try {
+    await readCommandEnvelope(await fetch('/cmd/ytmd/queue/delete', {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+    }));
+    setQueueActionFeedback('Queue cleared', 'success');
+    playbackState.queue = [];
+    playbackState.queueStatus = 'empty';
+    renderQueue();
+    window.setTimeout(() => {
+      refreshQueueFromProxy();
+      refreshNowPlayingFromProxy();
+    }, 500);
+  } catch (err) {
+    setQueueActionFeedback(err?.message || 'Unable to clear queue', 'error');
+    console.error('Clear queue failed', err);
+  } finally {
+    clearQueueButton.disabled = false;
   }
 }
 
@@ -394,6 +441,12 @@ if (queueList) {
       return;
     }
     handleQueueToggle(event);
+  });
+}
+
+if (clearQueueButton) {
+  clearQueueButton.addEventListener('click', () => {
+    handleClearQueue();
   });
 }
 
@@ -694,12 +747,60 @@ function isQueueEntryLike(value) {
   );
 }
 
-function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKeys = new Set(), queueIndex = null, treatArraysAsQueue = false) {
+function getOrderedQueueItemsArray(queueData) {
+  if (!queueData || typeof queueData !== 'object') {
+    return null;
+  }
+
+  if (Array.isArray(queueData)) {
+    return queueData;
+  }
+
+  if (queueData.data && typeof queueData.data === 'object' && !Array.isArray(queueData.data)) {
+    const nested = getOrderedQueueItemsArray(queueData.data);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  for (const key of ['items', 'entries', 'contents', 'queue', 'content']) {
+    if (Array.isArray(queueData[key])) {
+      return queueData[key];
+    }
+  }
+
+  return null;
+}
+
+function collectOrderedQueueEntries(queueData) {
+  const ordered = getOrderedQueueItemsArray(queueData);
+  if (ordered) {
+    const collected = [];
+    ordered.forEach((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        return;
+      }
+      const hasRenderer = Boolean(findQueueRendererCandidate(entry));
+      if (!isQueueEntryLike(entry) && !hasRenderer) {
+        return;
+      }
+      if (!hasMeaningfulQueueMetadata(entry) && !hasRenderer) {
+        return;
+      }
+      collected.push({ item: entry, queueIndex: index });
+    });
+    return collected;
+  }
+
+  return collectQueueEntriesFallback(queueData);
+}
+
+function collectQueueEntriesFallback(value, collected = [], seen = new WeakSet(), queueIndex = null, treatArraysAsQueue = false) {
   if (Array.isArray(value)) {
     if (!treatArraysAsQueue) {
       return collected;
     }
-    value.forEach((entry, index) => collectQueueEntries(entry, collected, seen, seenKeys, index, false));
+    value.forEach((entry, index) => collectQueueEntriesFallback(entry, collected, seen, index, false));
     return collected;
   }
 
@@ -714,15 +815,9 @@ function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKe
 
   if (isQueueEntryLike(value)) {
     const normalizedEntry = normalizeQueueItem(value);
-    const hasMeaningfulText = hasMeaningfulQueueMetadata(value);
-    if (normalizedEntry && hasMeaningfulText) {
-      const signatures = collectQueueEntrySignatures(value, normalizedEntry);
-      const isDuplicate = signatures.some((signature) => seenKeys.has(signature));
-      if (!isDuplicate) {
-        signatures.forEach((signature) => seenKeys.add(signature));
-        value.__queueKey = signatures[0] || '';
-        collected.push({ item: value, queueIndex: Number.isFinite(queueIndex) ? queueIndex : 0 });
-      }
+    if (normalizedEntry && hasMeaningfulQueueMetadata(value)) {
+      collected.push({ item: value, queueIndex: Number.isFinite(queueIndex) ? queueIndex : collected.length });
+      return collected;
     }
   }
 
@@ -730,10 +825,20 @@ function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKe
     if (!entry || typeof entry !== 'object') {
       return;
     }
-    collectQueueEntries(entry, collected, seen, seenKeys, queueIndex, false);
+    collectQueueEntriesFallback(entry, collected, seen, queueIndex, Array.isArray(entry));
   });
 
   return collected;
+}
+
+function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKeys = new Set(), queueIndex = null, treatArraysAsQueue = false) {
+  if (treatArraysAsQueue && Array.isArray(value)) {
+    return collectOrderedQueueEntries(value);
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value) && getOrderedQueueItemsArray(value)) {
+    return collectOrderedQueueEntries(value);
+  }
+  return collectQueueEntriesFallback(value, collected, seen, queueIndex, treatArraysAsQueue);
 }
 
 function collectQueueEntrySignatures(item, normalizedEntry) {
@@ -968,23 +1073,30 @@ function matchesCurrentSong(normalized, currentTitle, currentArtist, currentVide
   const title = normalizeText(currentTitle);
   const artist = normalizeText(currentArtist);
   const videoId = normalizeText(currentVideoId);
-  const selected = Boolean(normalized.selected || normalized.rawItem?.selected || normalized.rawItem?.isCurrent || normalized.rawItem?.current || normalized.item?.selected || normalized.item?.isCurrent || normalized.item?.current);
+  const selected = Boolean(
+    normalized.selected
+    || normalized.rawItem?.selected
+    || normalized.rawItem?.isCurrent
+    || normalized.rawItem?.current
+    || normalized.item?.selected
+    || normalized.item?.isCurrent
+    || normalized.item?.current
+  );
 
   if (selected) return true;
 
-  if (videoId && entry.videoId) {
-    if (entry.videoId === videoId) return true;
+  if (videoId && entry.videoId && entry.videoId === videoId) {
+    return true;
   }
 
-  if (!title && !artist) return false;
-  if (title && entry.title) {
-    const titleMatch = entry.title === title || entry.title.includes(title) || title.includes(entry.title);
-    if (titleMatch) return true;
+  if (title && artist && entry.title && entry.artist) {
+    return entry.title === title && entry.artist === artist;
   }
-  if (artist && entry.artist) {
-    const artistMatch = entry.artist === artist || entry.artist.includes(artist) || artist.includes(entry.artist);
-    if (artistMatch) return true;
+
+  if (title && !artist && entry.title) {
+    return entry.title === title;
   }
+
   return false;
 }
 
@@ -999,7 +1111,9 @@ function classifyQueueEntries(entries, currentIndex = 0, context = null) {
     .map((entry, index) => {
       const normalized = normalizeQueueItem(entry?.item || entry);
       if (!normalized || (!normalized.title && !normalized.artist && !normalized.videoId)) return null;
-      const sourceQueueIndex = Number.isFinite(entry?.queueIndex) ? entry.queueIndex : (Number.isFinite(entry?.sourceIndex) ? entry.sourceIndex : index);
+      const sourceQueueIndex = Number.isFinite(entry?.queueIndex)
+        ? entry.queueIndex
+        : (Number.isFinite(entry?.sourceIndex) ? entry.sourceIndex : index);
       return {
         ...normalized,
         queueIndex: sourceQueueIndex,
@@ -1012,52 +1126,56 @@ function classifyQueueEntries(entries, currentIndex = 0, context = null) {
     return [];
   }
 
-  const dedupedEntries = [];
-  const seenIdentityKeys = new Set();
-  for (const entry of normalizedEntries) {
-    const identityKey = buildQueueIdentityKey(entry);
-    if (!identityKey || seenIdentityKeys.has(identityKey)) {
-      continue;
-    }
-    seenIdentityKeys.add(identityKey);
-    dedupedEntries.push(entry);
+  let resolvedCurrentIndex = -1;
+
+  const selectedIndex = normalizedEntries.findIndex((entry) => entry.selected);
+  if (selectedIndex >= 0) {
+    resolvedCurrentIndex = selectedIndex;
   }
 
-  const explicitCurrentIndex = Number.isFinite(normalizedIndex) && normalizedIndex >= 0 && normalizedIndex < dedupedEntries.length
-    ? normalizedIndex
-    : -1;
-
-  let candidateCurrentIndex = -1;
-  const currentEntry = dedupedEntries.find((entry, index) => {
-    if (entry.selected) {
-      candidateCurrentIndex = index;
-      return true;
+  if (resolvedCurrentIndex < 0 && currentVideoId) {
+    for (let index = normalizedEntries.length - 1; index >= 0; index -= 1) {
+      const entry = normalizedEntries[index];
+      if (entry.videoId && entry.videoId.toLowerCase() === currentVideoId.toLowerCase()) {
+        resolvedCurrentIndex = index;
+        break;
+      }
     }
-    if (currentVideoId && entry.videoId && entry.videoId.toLowerCase() === currentVideoId.toLowerCase()) {
-      candidateCurrentIndex = index;
-      return true;
-    }
-    if (matchesCurrentSong(entry, currentTitle, currentArtist, currentVideoId)) {
-      candidateCurrentIndex = index;
-      return true;
-    }
-    return false;
-  });
+  }
 
-  const currentEntryIndex = currentEntry ? dedupedEntries.indexOf(currentEntry) : -1;
-  const resolvedCurrentIndex = currentEntryIndex >= 0
-    ? currentEntryIndex
-    : (explicitCurrentIndex >= 0 ? explicitCurrentIndex : (candidateCurrentIndex >= 0 ? candidateCurrentIndex : 0));
+  if (resolvedCurrentIndex < 0) {
+    const matchIndex = normalizedEntries.findIndex((entry) => (
+      matchesCurrentSong(entry, currentTitle, currentArtist, currentVideoId)
+    ));
+    if (matchIndex >= 0) {
+      resolvedCurrentIndex = matchIndex;
+    }
+  }
 
-  return dedupedEntries.map((entry, index) => {
+  if (resolvedCurrentIndex < 0 && Number.isFinite(currentIndex)) {
+    const bySourceIndex = normalizedEntries.findIndex((entry) => (
+      entry.sourceIndex === currentIndex || entry.queueIndex === currentIndex
+    ));
+    if (bySourceIndex >= 0) {
+      resolvedCurrentIndex = bySourceIndex;
+    }
+  }
+
+  if (resolvedCurrentIndex < 0 && Number.isFinite(normalizedIndex) && normalizedIndex >= 0 && normalizedIndex < normalizedEntries.length) {
+    resolvedCurrentIndex = normalizedIndex;
+  }
+
+  return normalizedEntries.map((entry, index) => {
     const queueIndex = Number.isFinite(entry?.sourceIndex) ? entry.sourceIndex : index;
-    if (index === resolvedCurrentIndex) {
+    if (resolvedCurrentIndex >= 0 && index === resolvedCurrentIndex) {
       return { item: entry, kind: 'current', queueIndex };
     }
 
-    return index < resolvedCurrentIndex
-      ? { item: entry, kind: 'previous', queueIndex }
-      : { item: entry, kind: 'next', queueIndex };
+    if (resolvedCurrentIndex >= 0 && index < resolvedCurrentIndex) {
+      return { item: entry, kind: 'previous', queueIndex };
+    }
+
+    return { item: entry, kind: 'next', queueIndex };
   });
 }
 
@@ -1079,25 +1197,28 @@ function buildQueueIdentityKey(entry) {
 function renderQueue() {
   if (!queueList) return;
 
-  const isPaused = Boolean(playbackState.hasSong && playbackState.isPaused);
-
   const feedbackMarkup = queueActionFeedback
     ? `<div class="queue-feedback queue-feedback--${queueActionFeedback.kind}">${queueActionFeedback.message}</div>`
     : '';
 
-  if (isPaused) {
-    queueList.innerHTML = `${feedbackMarkup}<div class="queue-empty-state">Queue unavailable while the player is Paused.</div>`;
+  if (playbackState.queueStatus === 'unavailable') {
+    queueList.innerHTML = `${feedbackMarkup}<div class="queue-empty-state">YTMD queue unavailable. Check that the player is reachable.</div>`;
     return;
   }
 
-  if (!playbackState.queue?.length) {
-    queueList.innerHTML = `${feedbackMarkup}<div class="queue-empty-state">Queue telemetry unavailable. Awaiting playback activity.</div>`;
+  if (playbackState.queueStatus === 'error') {
+    queueList.innerHTML = `${feedbackMarkup}<div class="queue-empty-state">Unable to load queue. Retrying…</div>`;
+    return;
+  }
+
+  if (!playbackState.queue?.length || playbackState.queueStatus === 'empty') {
+    queueList.innerHTML = `${feedbackMarkup}<div class="queue-empty-state">Queue is empty.</div>`;
     return;
   }
 
   const visibleQueueItems = (playbackState.queue || []).filter((item) => {
     const normalized = normalizeQueueItem(item?.item || item);
-    return hasMeaningfulQueueMetadata(item?.item || item) && Boolean(normalized?.title || normalized?.artist);
+    return hasMeaningfulQueueMetadata(item?.item || item) && Boolean(normalized?.title || normalized?.artist || normalized?.videoId);
   });
   const previousItems = visibleQueueItems.filter((item) => item.kind === 'previous');
   const currentItem = visibleQueueItems.find((item) => item.kind === 'current');
@@ -1113,13 +1234,14 @@ function renderQueue() {
     const displayText = [normalized.artist, normalized.title].filter(Boolean).join(' - ');
     const classes = [`queue-item`, kind === 'current' ? 'is-current' : '', kind === 'previous' ? 'is-previous' : ''].filter(Boolean).join(' ');
     const queueIndex = Number.isFinite(item?.queueIndex) ? item.queueIndex : '';
+    const actionsDisabled = !Number.isFinite(item?.queueIndex);
     return `
       <div class="${classes}">
         <div class="queue-row">
           <div class="queue-meta">${displayText || 'Untitled'}</div>
           <div class="queue-actions">
-            <button class="queue-action-btn queue-action-btn--play" type="button" data-queue-action="play" data-queue-index="${queueIndex}" aria-label="Play from queue">⏵</button>
-            <button class="queue-action-btn queue-action-btn--delete" type="button" data-queue-action="delete" data-queue-index="${queueIndex}" aria-label="Delete from queue">X</button>
+            <button class="queue-action-btn queue-action-btn--play" type="button" data-queue-action="play" data-queue-index="${queueIndex}" aria-label="Play from queue"${actionsDisabled ? ' disabled' : ''}>⏵</button>
+            <button class="queue-action-btn queue-action-btn--delete" type="button" data-queue-action="delete" data-queue-index="${queueIndex}" aria-label="Delete from queue"${actionsDisabled ? ' disabled' : ''}>X</button>
           </div>
         </div>
       </div>
@@ -1138,7 +1260,9 @@ function renderQueue() {
     : '';
   previousQueueRendered = previousItems.length > 0;
 
-  const currentMarkup = currentItem ? buildItem(currentItem, 'current') : '<div class="queue-item"><div class="queue-meta">No current song.</div></div>';
+  const currentMarkup = currentItem
+    ? buildItem(currentItem, 'current')
+    : '<div class="queue-item"><div class="queue-meta">No current song highlighted.</div></div>';
   const nextMarkup = nextItems.length > 0
     ? nextItems.map((entry) => buildItem(entry, 'next')).join('')
     : '<div class="queue-item"><div class="queue-meta">No upcoming songs.</div></div>';
@@ -1190,28 +1314,36 @@ async function refreshQueueFromProxy() {
   const requestId = ++queueRefreshToken;
   try {
     const response = await fetch('/cmd/ytmd/queue/get', { headers: { Accept: 'application/json' } });
-    if (!response.ok) {
-      throw new Error(`status ${response.status}`);
-    }
-
-    const payload = await response.json();
+    const payload = await readCommandEnvelope(response);
     const queueData = payload?.data ?? payload;
-    const queueEntries = collectQueueEntries(queueData?.items ?? queueData?.entries ?? queueData?.contents ?? queueData?.queue ?? queueData?.content, [], new WeakSet(), new Set(), 0, true);
-    const currentIndex = Number(queueData?.currentIndex ?? queueData?.index ?? queueData?.current ?? 0);
+    const queueEntries = collectOrderedQueueEntries(queueData);
+    const currentIndex = Number(queueData?.currentIndex ?? queueData?.index ?? queueData?.current ?? NaN);
 
     if (requestId !== queueRefreshToken) {
       return;
     }
 
-    const hasMeaningfulQueuePayload = queueEntries.length > 0 || (queueData && typeof queueData === 'object' && (Array.isArray(queueData.items) || Array.isArray(queueData.entries) || Array.isArray(queueData.contents) || Array.isArray(queueData.queue) || Array.isArray(queueData.content)));
+    if (queueEntries.length > 0) {
+      playbackState.queue = classifyQueueEntries(
+        queueEntries,
+        Number.isFinite(currentIndex) ? currentIndex : 0,
+        queueData,
+      );
+      playbackState.queueStatus = 'ok';
+      renderQueue();
+      return;
+    }
 
-    if (hasMeaningfulQueuePayload && queueEntries.length > 0) {
-      playbackState.queue = classifyQueueEntries(queueEntries, currentIndex, queueData);
+    const ordered = getOrderedQueueItemsArray(queueData);
+    if (ordered && ordered.length === 0) {
+      playbackState.queue = [];
+      playbackState.queueStatus = 'empty';
       renderQueue();
       return;
     }
 
     playbackState.queue = [];
+    playbackState.queueStatus = ordered ? 'empty' : 'error';
     renderQueue();
   } catch (err) {
     if (requestId !== queueRefreshToken) {
@@ -1219,6 +1351,7 @@ async function refreshQueueFromProxy() {
     }
 
     playbackState.queue = [];
+    playbackState.queueStatus = 'unavailable';
     renderQueue();
   }
 }

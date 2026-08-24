@@ -88,7 +88,7 @@ func TestSummarizeQueueEntryHandlesWrapperRenderer(t *testing.T) {
 	}
 }
 
-func TestCollectQueueEntriesForCommandDeduplicatesByTitleAndArtist(t *testing.T) {
+func TestCollectQueueEntriesForCommandPreservesOrderedDuplicates(t *testing.T) {
 	payload := map[string]any{
 		"items": []any{
 			map[string]any{
@@ -100,17 +100,22 @@ func TestCollectQueueEntriesForCommandDeduplicatesByTitleAndArtist(t *testing.T)
 			map[string]any{
 				"title":   "Same Song",
 				"artist":  "Artist A",
+				"videoId": "abc123",
+			},
+			map[string]any{
+				"title":   "Other Song",
+				"artist":  "Artist B",
 				"videoId": "xyz789",
 			},
 		},
 	}
 
 	entries := collectQueueEntriesForCommand(payload)
-	if len(entries) != 1 {
-		t.Fatalf("collectQueueEntriesForCommand() returned %d entries, want 1", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("collectQueueEntriesForCommand() returned %d entries, want 3", len(entries))
 	}
-	if entries[0].Title != "Same Song" {
-		t.Fatalf("title = %q, want Same Song", entries[0].Title)
+	if entries[0].Title != "Same Song" || entries[1].Title != "Same Song" || entries[2].Title != "Other Song" {
+		t.Fatalf("unexpected titles: %#v", entries)
 	}
 }
 
@@ -180,6 +185,58 @@ func TestBuildQueueInfoResponseUsesVideoIDToStartFromCurrentSong(t *testing.T) {
 	}
 	if totalSeconds, ok := dataMap["totalSeconds"].(int); !ok || totalSeconds != 420 {
 		t.Fatalf("totalSeconds = %#v, want 420", dataMap["totalSeconds"])
+	}
+}
+
+func TestBuildQueueInfoResponsePrefersVideoIDOverEarlierTitleMatch(t *testing.T) {
+	songPayload := map[string]any{
+		"song": map[string]any{
+			"title":   "Superman",
+			"artist":  "Goldfinger",
+			"videoId": "video-later",
+		},
+		"isPaused": false,
+	}
+	queuePayload := map[string]any{
+		"items": []any{
+			rendererEntry("Superman", "Goldfinger", "3:00", "video-early"),
+			rendererEntry("Other", "Artist", "2:00", "video-mid"),
+			rendererEntry("Superman", "Goldfinger", "3:00", "video-later"),
+			rendererEntry("After", "Artist", "1:00", "video-after"),
+		},
+	}
+
+	resp := buildQueueInfoResponse(songPayload, queuePayload)
+	if resp.ExitCode != 0 {
+		t.Fatalf("buildQueueInfoResponse() exitCode = %d, want 0", resp.ExitCode)
+	}
+
+	dataMap, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected response data map, got %#v", resp.Data)
+	}
+	songs, ok := dataMap["songs"].([]queueEntrySummary)
+	if !ok || len(songs) != 2 {
+		t.Fatalf("expected 2 remaining songs, got %#v", dataMap["songs"])
+	}
+	if songs[0].VideoID != "video-later" || songs[1].Title != "After" {
+		t.Fatalf("queue ordering = %#v, want video-later then After", songs)
+	}
+}
+
+func TestReorderQueueEntriesDoesNotMatchArtistOnly(t *testing.T) {
+	entries := []queueEntrySummary{
+		{Title: "Song A", Artist: "Shared Artist", VideoID: "a"},
+		{Title: "Song B", Artist: "Shared Artist", VideoID: "b"},
+	}
+	songData := map[string]any{
+		"title":  "Different Title",
+		"artist": "Shared Artist",
+	}
+
+	reordered := reorderQueueEntriesFromCurrentSong(entries, songData)
+	if len(reordered) != 2 || reordered[0].Title != "Song A" {
+		t.Fatalf("artist-only match should not reorder, got %#v", reordered)
 	}
 }
 
