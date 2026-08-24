@@ -1,6 +1,6 @@
 # Ignore the binaries
-jukeboks
-jukeboks.exe
+/jukeboks
+/jukeboks.exe
 
 # Server config file can 
 # contain data we don't 

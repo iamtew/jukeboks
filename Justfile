@@ -8,26 +8,23 @@ default:
     just --list
 
 build:
-    go build -o {{binary}} .
+    go build -o {{binary}} ./cmd/jukeboks
 
 clean:
     if (Test-Path {{binary}}) { Remove-Item {{binary}} -Force }
     if (Test-Path {{output_dir}}) { Remove-Item {{output_dir}} -Recurse -Force }
 
 run:
-    go run .
+    go run ./cmd/jukeboks
 
 test:
     go test ./...
 
 package:
     just clean
-    just build
     if (-not (Test-Path {{output_dir}})) { New-Item -ItemType Directory -Path {{output_dir}} -Force | Out-Null }
-    Copy-Item {{binary}} {{output_dir}}/ -Force
-    Copy-Item webroot {{output_dir}}/ -Recurse -Force
-    if (Test-Path "{{output_dir}}/webroot") { Remove-Item "{{output_dir}}/webroot" -Recurse -Force }
-    Move-Item "{{output_dir}}/webroot" "{{output_dir}}/webroot" -Force
+    go build -o {{output_dir}}/{{binary}} ./cmd/jukeboks
+    Copy-Item -Path webroot -Destination {{output_dir}}/webroot -Recurse -Force
 
 package-zip:
     just package
@@ -35,4 +32,4 @@ package-zip:
     Compress-Archive -Path {{output_dir}}/* -DestinationPath {{archive_name}}.zip -Force
 
 fmt:
-    gofmt -w *.go
+    gofmt -w cmd internal
