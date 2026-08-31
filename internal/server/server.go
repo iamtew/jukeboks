@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"jukeboks/internal/config"
+	"jukeboks/internal/policy"
 	"jukeboks/internal/ytmd"
 )
 
@@ -43,6 +45,9 @@ func (s *Server) Handler() http.Handler {
 			return
 		case "/cmd/jb/songinfo", "/cmd/jb/songinfo/":
 			s.songInfoHandler(w, r)
+			return
+		case "/cmd/jb/songrequest", "/cmd/jb/songrequest/":
+			s.songRequestHandler(w, r)
 			return
 		}
 		writeJSON(w, Envelope{ExitCode: 0, Message: "custom jukeboks command scaffold"})
@@ -118,6 +123,92 @@ func (s *Server) queueInfoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, ytmd.BuildQueueInfoResponse(songPayload, queuePayload))
+}
+
+func (s *Server) songRequestHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, Envelope{ExitCode: 1, Message: "songrequest requires GET"})
+		return
+	}
+
+	input := strings.TrimSpace(r.URL.Query().Get("input"))
+	if input == "" {
+		writeJSON(w, Envelope{ExitCode: 1, Message: "missing input parameter"})
+		return
+	}
+
+	videoID, err := ytmd.ExtractVideoID(input)
+	var lookup ytmd.SongLookup
+	if err == nil {
+		lookup, err = ytmd.LookupSongByVideoID(r.Context(), s.YTMD, videoID)
+	} else {
+		videoID, lookup, err = ytmd.LookupSongByQuery(r.Context(), s.YTMD, input)
+	}
+	if err != nil {
+		writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to look up song metadata: %v", err)})
+		return
+	}
+
+	cfg, err := s.Config.Get()
+	if err != nil {
+		writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to load config: %v", err)})
+		return
+	}
+
+	if err := policy.CheckContent(cfg, lookup.Duration, true, input, lookup.Title, lookup.Artist); err != nil {
+		writeJSON(w, Envelope{ExitCode: 1, Message: err.Error()})
+		return
+	}
+
+	queuePayload, err := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/queue", 3, 250*time.Millisecond)
+	if err != nil {
+		writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach queue endpoint: %v", err)})
+		return
+	}
+
+	if ytmd.QueueContainsVideoID(queuePayload, videoID) {
+		writeJSON(w, buildDuplicateSongResponse(videoID, lookup))
+		return
+	}
+
+	songPayload, err := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/song", 3, 250*time.Millisecond)
+	if err == nil && strings.EqualFold(ytmd.CurrentSongVideoID(songPayload), videoID) {
+		writeJSON(w, buildDuplicateSongResponse(videoID, lookup))
+		return
+	}
+
+	queuePayload, err = s.YTMD.PostJSON(r.Context(), "/api/v1/queue", map[string]any{
+		"videoId":        videoID,
+		"insertPosition": "INSERT_AT_END",
+	})
+	if err != nil {
+		writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach queue endpoint: %v", err)})
+		return
+	}
+
+	writeJSON(w, ytmd.BuildSongRequestResponse(videoID, queuePayload, lookup))
+}
+
+func buildDuplicateSongResponse(videoID string, lookup ytmd.SongLookup) Envelope {
+	message := "Song already in queue."
+	if lookup.Title != "" && lookup.Artist != "" {
+		message = fmt.Sprintf("Song already in queue: %s — %s.", lookup.Title, lookup.Artist)
+	} else if lookup.Title != "" {
+		message = fmt.Sprintf("Song already in queue: %s.", lookup.Title)
+	}
+
+	data := map[string]any{
+		"reason":  "duplicate",
+		"videoId": videoID,
+	}
+	if lookup.Title != "" {
+		data["title"] = lookup.Title
+	}
+	if lookup.Artist != "" {
+		data["artist"] = lookup.Artist
+	}
+
+	return Envelope{ExitCode: 1, Message: message, Data: data}
 }
 
 func writeJSON(w http.ResponseWriter, payload any) {

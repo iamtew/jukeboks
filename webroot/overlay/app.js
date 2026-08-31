@@ -37,13 +37,14 @@
   // Enable dev mode if ?dev=true and allow host/port overrides via query params.
   const params = new URLSearchParams(window.location.search);
   const devMode = params.get("dev") === "true";
-  const host = params.get("host") || "localhost";
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const host = params.get("host") || window.location.hostname || "localhost";
   const port = params.get("port") || "26538";
   const pulseParam = params.get("pulse");
   const pulseSpeed = pulseParam === null ? 3 : Math.max(0, Math.min(10, Number(pulseParam) || 0));
   const bgParam = params.get("bg");
   const bgOpacityLevel = bgParam === null ? 0 : Math.max(0, Math.min(6, Number(bgParam) || 0));
-  const WS_URL = `ws://${host}:${port}/api/v1/ws`;
+  const WS_URL = `${protocol}://${host}:${port}/api/v1/ws`;
 
   if (devMode) {
     document.body.classList.add("dev");

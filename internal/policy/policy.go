@@ -12,6 +12,39 @@ import (
 	"jukeboks/internal/config"
 )
 
+func CheckContent(cfg config.Config, durationSeconds int, requireDuration bool, candidates ...string) error {
+	for _, candidate := range candidates {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+		for _, entry := range cfg.Blacklist {
+			if strings.EqualFold(trimmed, strings.TrimSpace(entry)) {
+				return fmt.Errorf("request blocked by blacklist entry %q", entry)
+			}
+			if strings.Contains(strings.ToLower(trimmed), strings.ToLower(entry)) {
+				return fmt.Errorf("request blocked by blacklist entry %q", entry)
+			}
+		}
+	}
+
+	if requireDuration {
+		if durationSeconds <= 0 {
+			return fmt.Errorf("request blocked because song duration could not be verified")
+		}
+		if durationSeconds > cfg.MaxDuration {
+			return fmt.Errorf("request blocked because duration %d exceeds maxDuration %d", durationSeconds, cfg.MaxDuration)
+		}
+		return nil
+	}
+
+	if durationSeconds > cfg.MaxDuration {
+		return fmt.Errorf("request blocked because duration %d exceeds maxDuration %d", durationSeconds, cfg.MaxDuration)
+	}
+
+	return nil
+}
+
 func Enforce(cfg config.Config, r *http.Request) error {
 	queryValues := r.URL.Query()
 	textCandidates := []string{}
@@ -34,30 +67,22 @@ func Enforce(cfg config.Config, r *http.Request) error {
 		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 
-	for _, candidate := range textCandidates {
-		for _, entry := range cfg.Blacklist {
-			if strings.EqualFold(strings.TrimSpace(candidate), strings.TrimSpace(entry)) {
-				return fmt.Errorf("request blocked by blacklist entry %q", entry)
-			}
-			if strings.Contains(strings.ToLower(candidate), strings.ToLower(entry)) {
-				return fmt.Errorf("request blocked by blacklist entry %q", entry)
-			}
-		}
-	}
-
+	durationSeconds := 0
 	for _, key := range []string{"duration", "seconds", "length"} {
 		if value := strings.TrimSpace(queryValues.Get(key)); value != "" {
-			if parsed, err := strconv.Atoi(value); err == nil && parsed > cfg.MaxDuration {
-				return fmt.Errorf("request blocked because duration %d exceeds maxDuration %d", parsed, cfg.MaxDuration)
+			if parsed, err := strconv.Atoi(value); err == nil {
+				durationSeconds = parsed
+				break
 			}
 		}
 	}
-
-	if parsed, err := parsePolicyDurationFromBody(r); err == nil && parsed > cfg.MaxDuration {
-		return fmt.Errorf("request blocked because duration %d exceeds maxDuration %d", parsed, cfg.MaxDuration)
+	if durationSeconds == 0 {
+		if parsed, err := parsePolicyDurationFromBody(r); err == nil {
+			durationSeconds = parsed
+		}
 	}
 
-	return nil
+	return CheckContent(cfg, durationSeconds, false, textCandidates...)
 }
 
 func parsePolicyValuesFromBody(body []byte) ([]string, error) {

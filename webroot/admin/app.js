@@ -54,7 +54,10 @@ const playerButtons = {
   pause: document.getElementById('pauseButton'),
   forward: document.getElementById('forwardButton'),
   next: document.getElementById('nextButton'),
+  shuffle: document.getElementById('shuffleButton'),
+  autoplay: document.getElementById('autoplayButton'),
 };
+const songRequestInput = document.getElementById('songRequestInput');
 
 function updateSelection(selected) {
   if (!selected) return;
@@ -273,6 +276,7 @@ let playbackState = {
   artist: '',
   videoId: '',
   hasSong: false,
+  shuffle: false,
   queue: [],
   queueStatus: 'empty', // ok | empty | error | unavailable
 };
@@ -282,6 +286,10 @@ let previousQueueExpanded = false;
 let previousQueueRendered = false;
 let queueActionFeedback = null;
 let queueActionFeedbackTimer = null;
+let queueDragActive = false;
+let queueDragFromIndex = null;
+let queueMoveInFlight = false;
+let queuePointerDrag = null;
 
 async function readCommandEnvelope(response) {
   let payload = null;
@@ -434,6 +442,164 @@ async function handleClearQueue() {
   }
 }
 
+async function moveQueueItem(fromIndex, toIndex) {
+  if (!Number.isFinite(fromIndex) || !Number.isFinite(toIndex) || fromIndex === toIndex) {
+    return;
+  }
+  if (queueMoveInFlight) {
+    return;
+  }
+
+  queueMoveInFlight = true;
+  if (queueList) {
+    queueList.classList.add('is-reordering');
+  }
+
+  try {
+    await readCommandEnvelope(await fetch(`/cmd/ytmd/queue/${fromIndex}/patch`, {
+      method: 'PATCH',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toIndex }),
+    }));
+    setQueueActionFeedback('Moved queue item', 'success');
+    window.setTimeout(() => {
+      refreshQueueFromProxy();
+      refreshNowPlayingFromProxy();
+    }, 700);
+  } catch (err) {
+    setQueueActionFeedback(err?.message || 'Unable to move queue item', 'error');
+    console.error('Queue move failed', err);
+    refreshQueueFromProxy();
+  } finally {
+    queueMoveInFlight = false;
+    if (queueList) {
+      queueList.classList.remove('is-reordering');
+    }
+  }
+}
+
+function clearQueueDropTargets() {
+  if (!queueList) return;
+  queueList.querySelectorAll('.queue-item.is-drop-target').forEach((el) => {
+    el.classList.remove('is-drop-target');
+  });
+}
+
+function clearQueueDragState() {
+  queueDragActive = false;
+  queueDragFromIndex = null;
+  queuePointerDrag = null;
+  document.body.classList.remove('is-queue-dragging');
+  if (!queueList) return;
+  queueList.querySelectorAll('.queue-item.is-dragging').forEach((el) => {
+    el.classList.remove('is-dragging');
+  });
+  clearQueueDropTargets();
+}
+
+function getDraggableQueueItem(target) {
+  const item = target?.closest?.('.queue-item[data-queue-draggable="true"]');
+  if (!item || !queueList?.contains(item)) return null;
+  return item;
+}
+
+function resolveDropTargetAtPoint(clientX, clientY) {
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+
+  const draggingItem = queuePointerDrag?.item;
+  if (draggingItem) {
+    draggingItem.style.pointerEvents = 'none';
+  }
+
+  const element = document.elementFromPoint(clientX, clientY);
+  const target = getDraggableQueueItem(element);
+
+  if (draggingItem) {
+    draggingItem.style.pointerEvents = '';
+  }
+
+  return target;
+}
+
+function setQueueDropTarget(item) {
+  clearQueueDropTargets();
+  if (!item) return;
+  const toIndex = Number(item.dataset.queueIndex);
+  if (Number.isFinite(toIndex) && toIndex !== queueDragFromIndex) {
+    item.classList.add('is-drop-target');
+  }
+}
+
+function cleanupQueuePointerDragListeners(handle) {
+  if (!handle) return;
+  handle.removeEventListener('pointermove', handleQueuePointerMove);
+  handle.removeEventListener('pointerup', handleQueuePointerUp);
+  handle.removeEventListener('pointercancel', handleQueuePointerCancel);
+}
+
+function handleQueuePointerDown(event) {
+  if (event.button !== 0) return;
+
+  const handle = event.target.closest('.queue-drag-handle');
+  if (!handle) return;
+
+  const item = getDraggableQueueItem(handle);
+  if (!item) return;
+
+  const fromIndex = Number(item.dataset.queueIndex);
+  if (!Number.isFinite(fromIndex)) return;
+
+  event.preventDefault();
+
+  queueDragActive = true;
+  queueDragFromIndex = fromIndex;
+  queuePointerDrag = { pointerId: event.pointerId, fromIndex, item, handle };
+  item.classList.add('is-dragging');
+  document.body.classList.add('is-queue-dragging');
+
+  handle.setPointerCapture(event.pointerId);
+  handle.addEventListener('pointermove', handleQueuePointerMove);
+  handle.addEventListener('pointerup', handleQueuePointerUp);
+  handle.addEventListener('pointercancel', handleQueuePointerCancel);
+}
+
+function handleQueuePointerMove(event) {
+  if (!queuePointerDrag || event.pointerId !== queuePointerDrag.pointerId) return;
+  setQueueDropTarget(resolveDropTargetAtPoint(event.clientX, event.clientY));
+}
+
+async function finishQueuePointerDrag(event) {
+  if (!queuePointerDrag || event.pointerId !== queuePointerDrag.pointerId) return;
+
+  const fromIndex = queuePointerDrag.fromIndex;
+  const handle = queuePointerDrag.handle;
+  const target = resolveDropTargetAtPoint(event.clientX, event.clientY);
+  const toIndex = target ? Number(target.dataset.queueIndex) : NaN;
+
+  cleanupQueuePointerDragListeners(handle);
+  try {
+    handle.releasePointerCapture(event.pointerId);
+  } catch (_) {
+    // Ignore if capture was already released.
+  }
+
+  clearQueueDragState();
+
+  if (Number.isFinite(fromIndex) && Number.isFinite(toIndex) && fromIndex !== toIndex) {
+    await moveQueueItem(fromIndex, toIndex);
+  }
+}
+
+function handleQueuePointerUp(event) {
+  finishQueuePointerDrag(event);
+}
+
+function handleQueuePointerCancel(event) {
+  if (!queuePointerDrag || event.pointerId !== queuePointerDrag.pointerId) return;
+  cleanupQueuePointerDragListeners(queuePointerDrag.handle);
+  clearQueueDragState();
+}
+
 if (queueList) {
   queueList.addEventListener('click', (event) => {
     if (shouldHandleQueueAction(event)) {
@@ -442,6 +608,7 @@ if (queueList) {
     }
     handleQueueToggle(event);
   });
+  queueList.addEventListener('pointerdown', handleQueuePointerDown);
 }
 
 if (clearQueueButton) {
@@ -505,10 +672,22 @@ function updateCurrentMetaMarquee() {
   });
 }
 
+function setToggleButtonState(button, isOn) {
+  if (!button) return;
+  button.classList.toggle('is-active', Boolean(isOn));
+  button.setAttribute('aria-pressed', isOn ? 'true' : 'false');
+}
+
 function updatePlaybackButtons() {
-  if (!playerButtons.play || !playerButtons.pause) return;
-  playerButtons.play.classList.toggle('is-active', playbackState.hasSong && !playbackState.isPaused);
-  playerButtons.pause.classList.toggle('is-active', playbackState.hasSong && playbackState.isPaused);
+  if (playerButtons.play && playerButtons.pause) {
+    playerButtons.play.classList.toggle('is-active', playbackState.hasSong && !playbackState.isPaused);
+    playerButtons.pause.classList.toggle('is-active', playbackState.hasSong && playbackState.isPaused);
+  }
+  setToggleButtonState(playerButtons.shuffle, playbackState.shuffle);
+  if (playerButtons.autoplay) {
+    playerButtons.autoplay.classList.remove('is-active');
+    playerButtons.autoplay.setAttribute('aria-pressed', 'false');
+  }
 }
 
 function updateProgressBar() {
@@ -1196,6 +1375,7 @@ function buildQueueIdentityKey(entry) {
 
 function renderQueue() {
   if (!queueList) return;
+  if (queueDragActive || queueMoveInFlight) return;
 
   const feedbackMarkup = queueActionFeedback
     ? `<div class="queue-feedback queue-feedback--${queueActionFeedback.kind}">${queueActionFeedback.message}</div>`
@@ -1235,9 +1415,17 @@ function renderQueue() {
     const classes = [`queue-item`, kind === 'current' ? 'is-current' : '', kind === 'previous' ? 'is-previous' : ''].filter(Boolean).join(' ');
     const queueIndex = Number.isFinite(item?.queueIndex) ? item.queueIndex : '';
     const actionsDisabled = !Number.isFinite(item?.queueIndex);
+    const canDrag = kind === 'next' && Number.isFinite(item?.queueIndex);
+    const dragAttrs = canDrag
+      ? ` data-queue-draggable="true" data-queue-index="${queueIndex}"`
+      : '';
+    const dragHandle = canDrag
+      ? '<span class="queue-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">☰</span>'
+      : '';
     return `
-      <div class="${classes}">
+      <div class="${classes}"${dragAttrs}>
         <div class="queue-row">
+          ${dragHandle}
           <div class="queue-meta">${displayText || 'Untitled'}</div>
           <div class="queue-actions">
             <button class="queue-action-btn queue-action-btn--play" type="button" data-queue-action="play" data-queue-index="${queueIndex}" aria-label="Play from queue"${actionsDisabled ? ' disabled' : ''}>⏵</button>
@@ -1284,6 +1472,12 @@ function applyNowPlaying(payload) {
   const nextArtist = song?.artist || song?.artistName || song?.channel || song?.author || source?.artist || source?.artistName || '';
   const nextVideoId = song?.videoId || song?.id || source?.videoId || source?.id || source?.video?.id || '';
 
+  if (typeof payload?.shuffle === 'boolean') {
+    playbackState.shuffle = payload.shuffle;
+  } else if (typeof source?.shuffle === 'boolean') {
+    playbackState.shuffle = source.shuffle;
+  }
+
   if (nextTitle || nextArtist || duration || position || typeof source?.isPaused === 'boolean' || typeof song?.isPaused === 'boolean' || typeof song?.isPlaying === 'boolean') {
     playbackState.hasSong = true;
     playbackState.isPaused = isPaused;
@@ -1304,13 +1498,17 @@ function applyNowPlaying(payload) {
   totalTime.textContent = formatTime(playbackState.duration);
   updatePlaybackButtons();
   updateProgressBar();
-  if (playbackState.queue?.length) {
+  if (playbackState.queue?.length && !queueDragActive && !queueMoveInFlight) {
     playbackState.queue = classifyQueueEntries(playbackState.queue, 0, playbackState.queue);
     renderQueue();
   }
 }
 
 async function refreshQueueFromProxy() {
+  if (queueDragActive || queueMoveInFlight) {
+    return;
+  }
+
   const requestId = ++queueRefreshToken;
   try {
     const response = await fetch('/cmd/ytmd/queue/get', { headers: { Accept: 'application/json' } });
@@ -1319,7 +1517,7 @@ async function refreshQueueFromProxy() {
     const queueEntries = collectOrderedQueueEntries(queueData);
     const currentIndex = Number(queueData?.currentIndex ?? queueData?.index ?? queueData?.current ?? NaN);
 
-    if (requestId !== queueRefreshToken) {
+    if (requestId !== queueRefreshToken || queueDragActive || queueMoveInFlight) {
       return;
     }
 
@@ -1346,7 +1544,7 @@ async function refreshQueueFromProxy() {
     playbackState.queueStatus = ordered ? 'empty' : 'error';
     renderQueue();
   } catch (err) {
-    if (requestId !== queueRefreshToken) {
+    if (requestId !== queueRefreshToken || queueDragActive || queueMoveInFlight) {
       return;
     }
 
@@ -1402,6 +1600,11 @@ function connectNowPlaying() {
   socket.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+      if (data?.type === 'SHUFFLE_CHANGED' && typeof data.shuffle === 'boolean') {
+        playbackState.shuffle = data.shuffle;
+        updatePlaybackButtons();
+        return;
+      }
       if (data?.type === 'PLAYER_INFO' || data?.type === 'VIDEO_CHANGED' || data?.type === 'PLAYER_STATE_CHANGED' || data?.type === 'POSITION_CHANGED' || data?.song || data?.position || data?.isPaused || data?.artist || data?.title) {
         applyNowPlaying(data);
         window.setTimeout(() => {
@@ -1427,9 +1630,42 @@ async function sendPlayerCommand(path) {
     window.setTimeout(() => {
       refreshNowPlayingFromProxy();
       refreshQueueFromProxy();
+      refreshShuffleFromProxy();
     }, 600);
   } catch (err) {
     output.textContent = `Control request failed: ${err.message}`;
+  }
+}
+
+async function submitSongRequest() {
+  if (!songRequestInput) return;
+  const input = songRequestInput.value.trim();
+  if (!input) return;
+  try {
+    const response = await fetch(
+      `/cmd/jb/songrequest?input=${encodeURIComponent(input)}`,
+      { headers: { Accept: 'application/json' } },
+    );
+    const payload = await readCommandEnvelope(response);
+    songRequestInput.value = '';
+    songRequestInput.title = payload.message || 'Added to queue';
+    refreshQueueFromProxy();
+  } catch (err) {
+    songRequestInput.title = err.message;
+  }
+}
+
+async function refreshShuffleFromProxy() {
+  try {
+    const response = await fetch('/cmd/ytmd/shuffle/get', { headers: { Accept: 'application/json' } });
+    const payload = await readCommandEnvelope(response);
+    const data = payload?.data ?? payload;
+    if (typeof data?.state === 'boolean') {
+      playbackState.shuffle = data.state;
+      updatePlaybackButtons();
+    }
+  } catch (err) {
+    console.error('Failed to refresh shuffle state', err);
   }
 }
 
@@ -1463,9 +1699,15 @@ Object.entries(playerButtons).forEach(([key, button]) => {
     case 'next':
       path = '/cmd/ytmd/next/post';
       break;
+    case 'shuffle':
+      path = '/cmd/ytmd/shuffle/post';
+      break;
   }
 
   button.addEventListener('click', async () => {
+    if (key === 'autoplay') {
+      return;
+    }
     if (key === 'play') {
       playbackState.isPaused = false;
       updatePlaybackButtons();
@@ -1474,6 +1716,9 @@ Object.entries(playerButtons).forEach(([key, button]) => {
       playbackState.isPaused = true;
       updatePlaybackButtons();
       playState.textContent = '⏸';
+    } else if (key === 'shuffle') {
+      playbackState.shuffle = !playbackState.shuffle;
+      updatePlaybackButtons();
     }
 
     if (key === 'back') {
@@ -1490,6 +1735,15 @@ Object.entries(playerButtons).forEach(([key, button]) => {
   });
 });
 
+if (songRequestInput) {
+  songRequestInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submitSongRequest();
+    }
+  });
+}
+
 progressBar.addEventListener('input', () => {
   playbackState.position = Number(progressBar.value) || 0;
   updateProgressBar();
@@ -1503,20 +1757,24 @@ renderCommands();
 loadSettings();
 refreshNowPlayingFromProxy();
 refreshQueueFromProxy();
+refreshShuffleFromProxy();
 connectNowPlaying();
 window.setInterval(() => {
   refreshNowPlayingFromProxy();
   refreshQueueFromProxy();
+  refreshShuffleFromProxy();
 }, 10000);
 window.addEventListener('resize', updateCurrentMetaMarquee);
 window.addEventListener('focus', () => {
   refreshNowPlayingFromProxy();
+  refreshShuffleFromProxy();
   connectNowPlaying();
   updateCurrentMetaMarquee();
 });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     refreshNowPlayingFromProxy();
+    refreshShuffleFromProxy();
     connectNowPlaying();
     updateCurrentMetaMarquee();
   }

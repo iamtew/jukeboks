@@ -88,6 +88,21 @@ func TestSummarizeQueueEntryHandlesWrapperRenderer(t *testing.T) {
 	}
 }
 
+func TestQueueContainsVideoID(t *testing.T) {
+	payload := map[string]any{
+		"items": []any{
+			rendererEntry("Queued Song", "Queued Artist", "3:30", "abc12345678"),
+		},
+	}
+
+	if !QueueContainsVideoID(payload, "abc12345678") {
+		t.Fatal("QueueContainsVideoID() = false, want true for queued video")
+	}
+	if QueueContainsVideoID(payload, "xyz98765432") {
+		t.Fatal("QueueContainsVideoID() = true, want false for absent video")
+	}
+}
+
 func TestCollectQueueEntriesForCommandPreservesOrderedDuplicates(t *testing.T) {
 	payload := map[string]any{
 		"items": []any{

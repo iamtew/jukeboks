@@ -2,6 +2,10 @@
 /jukeboks
 /jukeboks.exe
 
+# Build artifacts
+/dist/
+/jukeboks-dist.zip
+
 # Server config file can 
 # contain data we don't 
 # want to track potentially!

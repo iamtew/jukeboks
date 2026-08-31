@@ -36,6 +36,11 @@
         <button id="forwardButton" class="control-btn" type="button">⏩</button>
         <button id="nextButton" class="control-btn" type="button">⏭</button>
       </section>
+      <section class="player-toggles" aria-label="Playback modes">
+        <button id="shuffleButton" class="control-btn" type="button" aria-label="Shuffle" aria-pressed="false">Shuffle</button>
+        <input id="songRequestInput" class="player-toggles__input" type="search" placeholder="Request song…" aria-label="Song request" autocomplete="off" />
+        <button id="autoplayButton" class="control-btn control-btn--readonly" type="button" aria-label="Autoplay" aria-pressed="false" aria-disabled="true" title="Autoplay toggle is not exposed by the YTMD API (queue autoPlaying does not match the player toggle)">Autoplay</button>
+      </section>
 
       <nav class="tabs" aria-label="Admin sections">
         <button class="tab active" data-page="queue">Queue</button>

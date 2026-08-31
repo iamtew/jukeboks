@@ -1,6 +1,7 @@
 package ytmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -97,6 +98,48 @@ func (c *Client) FetchJSONWithRetry(ctx context.Context, endpoint string, attemp
 	}
 
 	return nil, lastErr
+}
+
+func (c *Client) PostJSON(ctx context.Context, endpoint string, body any) (any, error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Base.String()+endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		if len(bodyBytes) > 0 {
+			return nil, fmt.Errorf("endpoint returned %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+		return nil, fmt.Errorf("endpoint returned %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	if len(bytes.TrimSpace(bodyBytes)) == 0 {
+		return map[string]any{}, nil
+	}
+
+	var decoded any
+	if err := json.Unmarshal(bodyBytes, &decoded); err != nil {
+		return nil, fmt.Errorf("failed to decode payload: %w", err)
+	}
+
+	return decoded, nil
 }
 
 func fetchYTMDJSONWithRetry(target *url.URL, endpoint string, attempts int, delay time.Duration) (any, error) {

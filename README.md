@@ -61,15 +61,42 @@ Behavior notes:
 http://localhost:42420/cmd/jb/queueinfo
 ```
 
+### `GET /cmd/jb/songrequest`
+
+Add a song to the **end** of the YTMD queue. Accepts a bare YouTube video ID, any supported YouTube / YouTube Music URL, or a free-text song query via a single query parameter.
+
+| | |
+|---|---|
+| **Method** | `GET` only |
+| **Parameter** | `input` (required) — bare 11-char video ID, YouTube URL, or song search query |
+| **Upstream** | `POST /api/v1/search` (text queries), then `POST /api/v1/queue` with `{ "videoId", "insertPosition": "INSERT_AT_END" }` |
+| **Success** | `exitCode: 0` |
+| **Message example** | `Added to queue: Title — Artist.` |
+| **Data** | `{ "videoId", "title", "artist" }` — title/artist when YTMD returns them |
+| **Missing input** | `exitCode: 1`, message mentions missing input |
+| **No search results** | `exitCode: 1`, message mentions `no search results` (text query with no YTMD hits) |
+| **Policy** | Respects `jukeboks.json` blacklist and `maxDuration` — looks up title/artist/duration via YTMD search before queueing |
+| **Blocked** | `exitCode: 1`, e.g. `request blocked by blacklist entry "Rick Astley"` or duration exceeds `maxDuration` |
+| **Duplicate** | `exitCode: 1`, `data.reason: "duplicate"` — skips if the video ID is already in the queue or currently playing |
+
+Supported `input` formats: bare video ID, `youtube.com/watch?v=`, `music.youtube.com/watch?v=`, `youtu.be/`, `/embed/`, `/shorts/`, scheme-less `youtu.be/...` links, or any text query (first YTMD search result is queued).
+
+```text
+http://localhost:42420/cmd/jb/songrequest?input=dQw4w9WgXcQ
+http://localhost:42420/cmd/jb/songrequest?input=https://youtu.be/dQw4w9WgXcQ
+http://localhost:42420/cmd/jb/songrequest?input=https://music.youtube.com/watch?v=dQw4w9WgXcQ
+http://localhost:42420/cmd/jb/songrequest?input=never+gonna+give+you+up
+```
+
 ### Other `/cmd/jb/*` (scaffold)
 
-Any path under `/cmd/jb/` that is not `songinfo` or `queueinfo` returns a stub:
+Any path under `/cmd/jb/` that is not `songinfo`, `queueinfo`, or `songrequest` returns a stub:
 
 ```json
 { "exitCode": 0, "message": "custom jukeboks command scaffold" }
 ```
 
-Reserved for future custom commands (e.g. song request). Not wired yet.
+Reserved for future custom commands. Not wired yet.
 
 ---
 
@@ -122,7 +149,7 @@ Optional query on Admin/Overlay: `?ytmdPort=26538` if YTMD listens elsewhere.
 | `blacklist` | `["Rick Astley"]` | Case-insensitive exact/substring match against query params (`query`, `title`, `artist`, `name`, `url`) and stringy JSON body values |
 | `maxDuration` | `600` | Max allowed seconds from `duration` / `seconds` / `length` (query or body). Values `≤ 0` or `> 86400` normalize back to 600 |
 
-Policy runs on **`/cmd/ytmd/*` only** — not on `/cmd/jb/*` or `/api/config`.
+Policy runs on **`/cmd/ytmd/*`** and on **`/cmd/jb/songrequest`** — not on other `/cmd/jb/*` or `/api/config`.
 
 Blocked requests still return **HTTP 200** with `exitCode: 1` and a message like `request blocked by blacklist entry "Rick Astley"`.
 
@@ -206,6 +233,7 @@ The proxy is generic: any `/cmd/ytmd/<path>` maps to `/api/v1/<path>` even if it
 - Highlights current via `selected` / `videoId` / exact title+artist.
 - Works while **paused** (unlike `/cmd/jb/queueinfo`).
 - Per-row Play → `PATCH …/queue/patch` `{ index }`; Delete → `DELETE …/queue/{index}/delete`.
+- Upcoming rows: drag handle reorder → `PATCH …/queue/{index}` `{ toIndex }` (YTMD absolute indices).
 - Clear queue → `DELETE …/queue/delete` (confirm).
 - Honors `exitCode` on actions (policy blocks surface as error feedback).
 
@@ -240,7 +268,8 @@ If the preferred port is busy, jukeboks tries `port` … `port+9`. Ctrl+C / SIGT
 | `just test` | `go test ./...` |
 | `just build` | `jukeboks.exe` in repo root |
 | `just package` | `dist/jukeboks.exe` + `dist/webroot/` |
-| `just package-zip` | Zip of `dist/` |
+| `just package-zip` | Zip of `dist/` (exe + webroot at archive root) |
+| `just verify-package` | Rebuilds `dist/` and validates install layout (and zip if present) |
 | `just fmt` | `gofmt` on `cmd` + `internal` |
 
 Runtime looks for `webroot/` and `jukeboks.json` next to the executable when packaged (Start Menu shortcuts still work), otherwise in the current working directory. `just run` from the repo root uses `./webroot` and `./jukeboks.json`.
@@ -288,6 +317,7 @@ Upstream YTMD OpenAPI (when running): `http://localhost:26538/doc`
 | `ws://localhost:26538/api/v1/ws` | YTMD WebSocket — Admin/Overlay connect **directly**; jukeboks does not proxy WS |
 | `GET /cmd/jb/songinfo` | Custom jukeboks summary (see top) — not a YTMD passthrough |
 | `GET /cmd/jb/queueinfo` | Custom jukeboks summary (see top) — not a YTMD passthrough |
+| `GET /cmd/jb/songrequest?input=…` | Add song to queue end (bare ID, YouTube URL, or text search query) |
 | `GET /health` | jukeboks liveness |
 | `GET /api/config` | jukeboks config |
 
@@ -311,6 +341,7 @@ Custom (chat-friendly) GETs:
 ```text
 http://localhost:42420/cmd/jb/songinfo
 http://localhost:42420/cmd/jb/queueinfo
+http://localhost:42420/cmd/jb/songrequest?input=dQw4w9WgXcQ
 http://localhost:42420/health
 http://localhost:42420/api/config
 ```

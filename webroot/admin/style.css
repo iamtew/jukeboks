@@ -159,8 +159,29 @@ button {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 6px;
+  margin-bottom: 6px;
+  width: 100%;
+}
+
+.player-toggles {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px;
   margin-bottom: 8px;
   width: 100%;
+}
+
+.player-toggles__input {
+  min-width: 0;
+  padding: var(--control-padding-y) 8px;
+  font-size: var(--control-font-size);
+  border: 1px solid var(--border);
+  background: var(--panel-alt);
+  color: var(--text);
+}
+
+.control-btn[aria-disabled="true"] {
+  cursor: default;
 }
 
 .control-btn {
@@ -189,6 +210,18 @@ button {
 #pauseButton:not(.is-active) {
   background: var(--panel-alt);
   color: var(--text);
+}
+
+.control-btn--readonly,
+#autoplayButton {
+  opacity: 0.72;
+  cursor: default;
+}
+
+#autoplayButton.is-active {
+  outline: none;
+  background: var(--panel-alt);
+  color: var(--muted);
 }
 
 .tabs {
@@ -322,6 +355,48 @@ button {
   min-width: 0;
 }
 
+.queue-drag-handle {
+  flex-shrink: 0;
+  width: 18px;
+  color: var(--muted);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  opacity: 0.45;
+  font-size: 0.85rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.queue-item:hover .queue-drag-handle,
+.queue-item.is-dragging .queue-drag-handle {
+  opacity: 1;
+  color: var(--text);
+}
+
+body.is-queue-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+body.is-queue-dragging .queue-drag-handle {
+  cursor: grabbing;
+}
+
+.queue-item.is-dragging {
+  opacity: 0.45;
+}
+
+.queue-item.is-drop-target {
+  box-shadow: inset 0 0 0 2px rgba(121, 214, 255, 0.85);
+  background: rgba(121, 214, 255, 0.18);
+}
+
+.queue-list.is-reordering {
+  pointer-events: none;
+  opacity: 0.72;
+}
+
 .queue-meta {
   color: var(--muted);
   font-size: 0.88rem;
@@ -330,6 +405,7 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
 }
 
 .queue-item.is-current .queue-meta {
@@ -597,6 +673,11 @@ pre {
 
   .player-controls {
     grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+    gap: 4px;
+  }
+
+  .player-toggles {
+    grid-template-columns: auto 1fr auto;
     gap: 4px;
   }
 

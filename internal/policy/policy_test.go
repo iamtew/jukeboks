@@ -43,3 +43,27 @@ func TestEnforceAllowsNormalRequest(t *testing.T) {
 		t.Fatalf("Enforce() error = %v, want nil", err)
 	}
 }
+
+func TestCheckContentBlocksBlacklistedSong(t *testing.T) {
+	cfg := config.Config{Blacklist: []string{"Rick Astley"}, MaxDuration: 600}
+	err := CheckContent(cfg, 214, true, "Never Gonna Give You Up", "Rick Astley")
+	if err == nil {
+		t.Fatal("CheckContent() error = nil, want blacklist rejection")
+	}
+}
+
+func TestCheckContentBlocksOverlongSong(t *testing.T) {
+	cfg := config.Config{Blacklist: []string{"Rick Astley"}, MaxDuration: 120}
+	err := CheckContent(cfg, 214, true, "Safe Artist", "Safe Title")
+	if err == nil {
+		t.Fatal("CheckContent() error = nil, want maxDuration rejection")
+	}
+}
+
+func TestCheckContentRequiresDurationWhenRequested(t *testing.T) {
+	cfg := config.Config{Blacklist: []string{"Rick Astley"}, MaxDuration: 600}
+	err := CheckContent(cfg, 0, true, "Safe Artist", "Safe Title")
+	if err == nil {
+		t.Fatal("CheckContent() error = nil, want missing duration rejection")
+	}
+}

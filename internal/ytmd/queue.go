@@ -58,6 +58,112 @@ func BuildQueueInfoResponse(songPayload, queuePayload any) any {
 	return buildQueueInfoResponse(songPayload, queuePayload)
 }
 
+func buildSongRequestResponse(videoID string, queuePayload any, lookup SongLookup) responseEnvelope {
+	data := map[string]any{"videoId": videoID}
+	title := lookup.Title
+	artist := lookup.Artist
+
+	if payloadMap, ok := queuePayload.(map[string]any); ok && len(payloadMap) > 0 {
+		payloadTitle, payloadArtist := extractSongMetadata(payloadMap)
+		if nested, ok := songPayloadMapValue(payloadMap, "data"); ok {
+			nestedTitle, nestedArtist := extractSongMetadata(nested)
+			if payloadTitle == "" {
+				payloadTitle = nestedTitle
+			}
+			if payloadArtist == "" {
+				payloadArtist = nestedArtist
+			}
+		}
+		if nested, ok := songPayloadMapValue(payloadMap, "song"); ok {
+			nestedTitle, nestedArtist := extractSongMetadata(nested)
+			if payloadTitle == "" {
+				payloadTitle = nestedTitle
+			}
+			if payloadArtist == "" {
+				payloadArtist = nestedArtist
+			}
+		}
+		if payloadTitle != "" {
+			title = payloadTitle
+		}
+		if payloadArtist != "" {
+			artist = payloadArtist
+		}
+	}
+
+	if title != "" {
+		data["title"] = title
+	}
+	if artist != "" {
+		data["artist"] = artist
+	}
+
+	message := fmt.Sprintf("Added to queue: %s.", videoID)
+	if title != "" && artist != "" {
+		message = fmt.Sprintf("Added to queue: %s — %s.", title, artist)
+	} else if title != "" {
+		message = fmt.Sprintf("Added to queue: %s.", title)
+	}
+
+	return responseEnvelope{ExitCode: 0, Message: message, Data: data}
+}
+
+func extractSongMetadata(payload map[string]any) (string, string) {
+	title := asString(payload["title"])
+	if title == "" {
+		title = asString(payload["name"])
+	}
+	artist := asString(payload["artist"])
+	if artist == "" {
+		artist = asString(payload["artistName"])
+	}
+	return title, artist
+}
+
+func BuildSongRequestResponse(videoID string, queuePayload any, lookup SongLookup) any {
+	return buildSongRequestResponse(videoID, queuePayload, lookup)
+}
+
+func QueueContainsVideoID(payload any, videoID string) bool {
+	for _, item := range orderedQueueItemsArray(payload) {
+		itemMap, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		entry := summarizeQueueEntry(itemMap)
+		if strings.EqualFold(entry.VideoID, videoID) {
+			return true
+		}
+		if strings.EqualFold(extractVideoIDFromValue(itemMap), videoID) {
+			return true
+		}
+	}
+	return false
+}
+
+func CurrentSongVideoID(songPayload any) string {
+	songData := map[string]any{}
+	if songPayloadMap, ok := songPayload.(map[string]any); ok {
+		songData = songPayloadMap
+	}
+	if nested, ok := songPayloadMapValue(songData, "data"); ok {
+		for key, value := range nested {
+			songData[key] = value
+		}
+	}
+	if nested, ok := songPayloadMapValue(songData, "song"); ok {
+		for key, value := range nested {
+			songData[key] = value
+		}
+	}
+
+	videoID := asString(songData["videoId"])
+	if videoID == "" {
+		videoID = asString(songData["video_id"])
+	}
+	return videoID
+}
+
 func collectQueueEntriesForCommand(payload any) []queueEntrySummary {
 	if payload == nil {
 		return nil
