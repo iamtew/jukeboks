@@ -26,6 +26,15 @@ body {
   padding: 48px 24px 64px;
 }
 
+.logo {
+  display: block;
+  width: min(280px, 70vw);
+  height: auto;
+  margin: 0 0 24px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: var(--accent);
