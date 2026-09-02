@@ -11,7 +11,13 @@ type responseEnvelope struct {
 	Data     any    `json:"data,omitempty"`
 }
 
-func buildSongInfoResponse(songPayload any) responseEnvelope {
+type CurrentSong struct {
+	Title  string
+	Artist string
+	State  string
+}
+
+func ParseCurrentSong(songPayload any) CurrentSong {
 	songData := map[string]any{}
 	if songPayloadMap, ok := songPayload.(map[string]any); ok {
 		songData = songPayloadMap
@@ -51,13 +57,25 @@ func buildSongInfoResponse(songPayload any) responseEnvelope {
 		}
 	}
 
-	if title == "" && artist == "" {
-		return responseEnvelope{ExitCode: 1, Message: "Song unavailable. No current track information was returned by the player.", Data: map[string]any{"reason": "no_song"}}
-	}
-
 	state := "playing"
 	if isPaused {
 		state = "paused"
+	}
+	if title == "" && artist == "" {
+		state = ""
+	}
+
+	return CurrentSong{Title: title, Artist: artist, State: state}
+}
+
+func buildSongInfoResponse(songPayload any) responseEnvelope {
+	song := ParseCurrentSong(songPayload)
+	title := song.Title
+	artist := song.Artist
+	state := song.State
+
+	if title == "" && artist == "" {
+		return responseEnvelope{ExitCode: 1, Message: "Song unavailable. No current track information was returned by the player.", Data: map[string]any{"reason": "no_song"}}
 	}
 
 	message := fmt.Sprintf("Song: %s — %s. Playback state: %s.", title, artist, state)

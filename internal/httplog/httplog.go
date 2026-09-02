@@ -43,6 +43,7 @@ func SetEnabled(enabled bool) {
 
 func InitColor() {
 	colorInit.Do(func() {
+		enableNativeConsole()
 		if !isTerminal(Out) {
 			UseColor = false
 		}
