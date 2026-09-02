@@ -256,7 +256,7 @@ func extractArtistFromSearchSubtitle(subtitle string) string {
 			continue
 		}
 		lower := strings.ToLower(candidate)
-		if lower == "video" || lower == "single" || lower == "ep" || lower == "album" {
+		if lower == "video" || lower == "song" || lower == "music" || lower == "single" || lower == "ep" || lower == "album" {
 			continue
 		}
 		if strings.Contains(lower, " view") {

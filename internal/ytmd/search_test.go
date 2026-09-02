@@ -110,6 +110,92 @@ func TestFindFirstSearchResultFromMusicCardShelf(t *testing.T) {
 	}
 }
 
+func TestFindFirstSearchResultFromMusicCardShelfSongType(t *testing.T) {
+	payload := map[string]any{
+		"contents": []any{
+			map[string]any{
+				"musicCardShelfRenderer": map[string]any{
+					"title": map[string]any{
+						"runs": []any{map[string]any{"text": "Never Gonna Give You Up"}},
+					},
+					"subtitle": map[string]any{
+						"runs": []any{
+							map[string]any{"text": "Song"},
+							map[string]any{"text": " • "},
+							map[string]any{"text": "Rick Astley"},
+							map[string]any{"text": " • "},
+							map[string]any{"text": "3:34"},
+						},
+					},
+					"onTap": map[string]any{
+						"watchEndpoint": map[string]any{"videoId": "dQw4w9WgXcQ"},
+					},
+				},
+			},
+		},
+	}
+
+	entry, ok := findFirstSearchResult(payload)
+	if !ok {
+		t.Fatal("findFirstSearchResult() ok = false, want true")
+	}
+	if entry.VideoID != "dQw4w9WgXcQ" {
+		t.Fatalf("videoId = %q, want dQw4w9WgXcQ", entry.VideoID)
+	}
+	if entry.Title != "Never Gonna Give You Up" {
+		t.Fatalf("title = %q", entry.Title)
+	}
+	if entry.Artist != "Rick Astley" {
+		t.Fatalf("artist = %q, want Rick Astley", entry.Artist)
+	}
+	if entry.DurationSeconds != 214 {
+		t.Fatalf("duration = %d, want 214", entry.DurationSeconds)
+	}
+}
+
+func TestExtractArtistFromSearchSubtitle(t *testing.T) {
+	tests := []struct {
+		name     string
+		subtitle string
+		want     string
+	}{
+		{
+			name:     "video prefix",
+			subtitle: "Video • Rick Astley • 3:34",
+			want:     "Rick Astley",
+		},
+		{
+			name:     "song prefix",
+			subtitle: "Song • Rick Astley • 3:34",
+			want:     "Rick Astley",
+		},
+		{
+			name:     "music prefix",
+			subtitle: "Music • Rick Astley • 3:34",
+			want:     "Rick Astley",
+		},
+		{
+			name:     "view count segment skipped",
+			subtitle: "Video • 1.2M views • Rick Astley • 3:34",
+			want:     "Rick Astley",
+		},
+		{
+			name:     "bare artist",
+			subtitle: "Rick Astley",
+			want:     "Rick Astley",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractArtistFromSearchSubtitle(tt.subtitle)
+			if got != tt.want {
+				t.Fatalf("extractArtistFromSearchSubtitle(%q) = %q, want %q", tt.subtitle, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFindFirstSearchResultReturnsFirstMatch(t *testing.T) {
 	payload := map[string]any{
 		"contents": []any{
