@@ -290,3 +290,94 @@ func TestBuildQueueInfoResponseKeepsOnlyArtistFromByline(t *testing.T) {
 		t.Fatalf("display text = %q, should not include album or year", songs[0].DisplayText)
 	}
 }
+
+func TestSeedRequestInsertIndex(t *testing.T) {
+	requestIDs := map[string]struct{}{}
+
+	t.Run("after current when only seed tracks follow", func(t *testing.T) {
+		payload := map[string]any{
+			"items": []any{
+				rendererEntry("Seed One", "Artist", "3:00", "seed1111111"),
+				rendererEntry("Seed Two", "Artist", "3:00", "seed2222222"),
+			},
+		}
+		items := payload["items"].([]any)
+		items[0].(map[string]any)["playlistPanelVideoRenderer"].(map[string]any)["selected"] = true
+
+		if got := SeedRequestInsertIndex(payload, requestIDs, ""); got != 1 {
+			t.Fatalf("SeedRequestInsertIndex() = %d, want 1", got)
+		}
+	})
+
+	t.Run("uses now playing video id when selected flag missing", func(t *testing.T) {
+		payload := map[string]any{
+			"items": []any{
+				rendererEntry("Seed One", "Artist", "3:00", "seed1111111"),
+				rendererEntry("Seed Two", "Artist", "3:00", "seed2222222"),
+			},
+		}
+
+		if got := SeedRequestInsertIndex(payload, requestIDs, "seed1111111"); got != 1 {
+			t.Fatalf("SeedRequestInsertIndex() = %d, want 1", got)
+		}
+	})
+
+	t.Run("after existing request block", func(t *testing.T) {
+		payload := map[string]any{
+			"items": []any{
+				rendererEntry("Seed One", "Artist", "3:00", "seed1111111"),
+				rendererEntry("Request One", "Artist", "3:30", "req11111111"),
+				rendererEntry("Seed Two", "Artist", "3:00", "seed2222222"),
+			},
+		}
+		items := payload["items"].([]any)
+		items[0].(map[string]any)["playlistPanelVideoRenderer"].(map[string]any)["selected"] = true
+		ids := map[string]struct{}{"req11111111": {}}
+
+		if got := SeedRequestInsertIndex(payload, ids, ""); got != 2 {
+			t.Fatalf("SeedRequestInsertIndex() = %d, want 2", got)
+		}
+	})
+
+	t.Run("after multiple requests", func(t *testing.T) {
+		payload := map[string]any{
+			"items": []any{
+				rendererEntry("Seed One", "Artist", "3:00", "seed1111111"),
+				rendererEntry("Request One", "Artist", "3:30", "req11111111"),
+				rendererEntry("Request Two", "Artist", "3:20", "req22222222"),
+				rendererEntry("Seed Two", "Artist", "3:00", "seed2222222"),
+			},
+		}
+		items := payload["items"].([]any)
+		items[0].(map[string]any)["playlistPanelVideoRenderer"].(map[string]any)["selected"] = true
+		ids := map[string]struct{}{
+			"req11111111": {},
+			"req22222222": {},
+		}
+
+		if got := SeedRequestInsertIndex(payload, ids, ""); got != 3 {
+			t.Fatalf("SeedRequestInsertIndex() = %d, want 3", got)
+		}
+	})
+
+	t.Run("stops at first non-request even if ids missing earlier", func(t *testing.T) {
+		payload := map[string]any{
+			"items": []any{
+				rendererEntry("Seed One", "Artist", "3:00", "seed1111111"),
+				rendererEntry("Request One", "Artist", "3:30", "req11111111"),
+				rendererEntry("Seed Two", "Artist", "3:00", "seed2222222"),
+				rendererEntry("Request Two", "Artist", "3:20", "req22222222"),
+			},
+		}
+		items := payload["items"].([]any)
+		items[0].(map[string]any)["playlistPanelVideoRenderer"].(map[string]any)["selected"] = true
+		ids := map[string]struct{}{
+			"req11111111": {},
+			"req22222222": {},
+		}
+
+		if got := SeedRequestInsertIndex(payload, ids, ""); got != 2 {
+			t.Fatalf("SeedRequestInsertIndex() = %d, want 2", got)
+		}
+	})
+}

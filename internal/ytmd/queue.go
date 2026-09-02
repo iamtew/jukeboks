@@ -430,7 +430,19 @@ func summarizeQueueEntry(value map[string]any) queueEntrySummary {
 	if artist != "" {
 		displayText = fmt.Sprintf("%s - %s", artist, title)
 	}
-	return queueEntrySummary{Title: title, Artist: artist, VideoID: videoID, DurationSeconds: durationSeconds, DurationLabel: formatMinutes(durationSeconds), DisplayText: displayText}
+	entry := queueEntrySummary{Title: title, Artist: artist, VideoID: videoID, DurationSeconds: durationSeconds, DurationLabel: formatMinutes(durationSeconds), DisplayText: displayText}
+	entry = enrichSearchEntry(value, entry)
+	if entry.DisplayText == "" {
+		if entry.Artist != "" && entry.Title != "" {
+			entry.DisplayText = fmt.Sprintf("%s - %s", entry.Artist, entry.Title)
+		} else {
+			entry.DisplayText = entry.Title
+		}
+	}
+	if entry.DurationLabel == "" && entry.DurationSeconds > 0 {
+		entry.DurationLabel = formatMinutes(entry.DurationSeconds)
+	}
+	return entry
 }
 
 func extractQueueRendererCandidate(value map[string]any) map[string]any {

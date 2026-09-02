@@ -15,9 +15,17 @@ const (
 	maxDurationCap        = 86400
 )
 
+type SeedPlaylist struct {
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	TrackCount int    `json:"trackCount"`
+}
+
 type Config struct {
-	Blacklist   []string `json:"blacklist"`
-	MaxDuration int      `json:"maxDuration"`
+	Blacklist           []string       `json:"blacklist"`
+	MaxDuration         int            `json:"maxDuration"`
+	SeedPlaylists       []SeedPlaylist `json:"seedPlaylists,omitempty"`
+	ClearQueueOnRequest bool           `json:"clearQueueOnRequest"`
 }
 
 func Default() Config {
@@ -99,6 +107,35 @@ func Normalize(cfg Config) Config {
 	if cfg.MaxDuration <= 0 || cfg.MaxDuration > maxDurationCap {
 		cfg.MaxDuration = DefaultMaxDuration
 	}
+
+	normalizedSeed := make([]SeedPlaylist, 0, len(cfg.SeedPlaylists))
+	seenSeed := map[string]struct{}{}
+	for _, playlist := range cfg.SeedPlaylists {
+		id := strings.TrimSpace(playlist.ID)
+		if id == "" {
+			continue
+		}
+		key := strings.ToLower(id)
+		if _, ok := seenSeed[key]; ok {
+			continue
+		}
+		seenSeed[key] = struct{}{}
+		name := strings.TrimSpace(playlist.Name)
+		if name == "" {
+			name = id
+		}
+		trackCount := playlist.TrackCount
+		if trackCount < 0 {
+			trackCount = 0
+		}
+		normalizedSeed = append(normalizedSeed, SeedPlaylist{
+			ID:         id,
+			Name:       name,
+			TrackCount: trackCount,
+		})
+	}
+	cfg.SeedPlaylists = normalizedSeed
+
 	return cfg
 }
 

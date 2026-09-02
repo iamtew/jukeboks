@@ -78,8 +78,7 @@ Add a song to the **end** of the YTMD queue. Accepts a bare YouTube video ID, an
 | **Policy** | Respects `jukeboks.json` blacklist and `maxDuration` — looks up title/artist/duration via YTMD search before queueing |
 | **Blocked** | `exitCode: 1`, e.g. `request blocked by blacklist entry "Rick Astley"` or duration exceeds `maxDuration` |
 | **Duplicate** | `exitCode: 1`, `data.reason: "duplicate"` — skips if the video ID is already in the queue or currently playing |
-
-Supported `input` formats: bare video ID, `youtube.com/watch?v=`, `music.youtube.com/watch?v=`, `youtu.be/`, `/embed/`, `/shorts/`, scheme-less `youtu.be/...` links, or any text query (first YTMD search result is queued).
+| **Seed mode** | Tracks seed IDs and an ordered request FIFO separately, synced from the live YTMD queue. Requests append via `INSERT_AT_END` then move after the current track / existing requests (FIFO), ahead of seed tracks. If `clearQueueOnRequest` is enabled, upcoming seed tracks are removed first |
 
 ```text
 http://localhost:42420/cmd/jb/songrequest?input=dQw4w9WgXcQ
@@ -87,6 +86,39 @@ http://localhost:42420/cmd/jb/songrequest?input=https://youtu.be/dQw4w9WgXcQ
 http://localhost:42420/cmd/jb/songrequest?input=https://music.youtube.com/watch?v=dQw4w9WgXcQ
 http://localhost:42420/cmd/jb/songrequest?input=never+gonna+give+you+up
 ```
+
+Supported `input` formats: bare video ID, `youtube.com/watch?v=`, `music.youtube.com/watch?v=`, `youtu.be/`, `/embed/`, `/shorts/`, scheme-less `youtu.be/...` links, or any text query (first YTMD search result is queued).
+
+### Seed playlists
+
+Seed playlists are fallback content for when the queue is idle. Admins save playlists in the **Seed** admin tab; clicking a saved playlist enqueues its tracks and enters **seed mode**. While seed mode is active, song requests are inserted after the current track. If there are already requested songs queued next, new requests go after those — keeping requests ahead of seed tracks.
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/seed/status` | GET | Seed mode state, saved playlists, `clearQueueOnRequest` |
+| `/api/seed/resolve` | POST | Resolve URL/ID to `{ id, name, trackCount }` without saving |
+| `/api/seed/playlists` | POST | Resolve and save a seed playlist to `jukeboks.json` |
+| `/api/seed/playlists/{id}` | DELETE | Remove a saved seed playlist |
+| `/api/seed/settings` | POST | Update `{ clearQueueOnRequest }` |
+| `/cmd/jb/seed/enqueue?playlistId=…` | POST | Enqueue a saved seed playlist and enter seed mode |
+| `/cmd/jb/seed/queue?playlistId=…` | DELETE | Remove that playlist's tracks from the YTMD queue |
+
+Config fields in `jukeboks.json`:
+
+```json
+{
+  "blacklist": ["Rick Astley"],
+  "maxDuration": 600,
+  "clearQueueOnRequest": false,
+  "seedPlaylists": [
+    { "id": "PLxxxxxxxx", "name": "My Seed Mix", "trackCount": 42 }
+  ]
+}
+```
+
+Seed mode state is runtime-only (resets when jukeboks restarts). Blacklist and `maxDuration` apply when enqueueing seed tracks.
+
+Playlist lookup order: YouTube Music public browse API (supports `PL…` playlists and `OLAK5uy_…` albums), then YTMD search, then YTMD `playPlaylist` + queue read for playlists only visible inside your logged-in YTMD session.
 
 ### Other `/cmd/jb/*` (scaffold)
 
@@ -224,7 +256,7 @@ The proxy is generic: any `/cmd/ytmd/<path>` maps to `/api/v1/<path>` even if it
 | URL | Role |
 |-----|------|
 | `http://localhost:42420/` | Landing links |
-| `http://localhost:42420/admin/` | Now-playing dock, transport, Queue / Settings / API tabs |
+| `http://localhost:42420/admin/` | Now-playing dock, transport, Queue / Seed / Settings / API tabs |
 | `http://localhost:42420/overlay/` | OBS Browser Source now-playing |
 
 **Admin Queue**

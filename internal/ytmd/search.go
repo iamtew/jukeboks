@@ -296,7 +296,39 @@ func extractVideoIDFromValue(value map[string]any) string {
 			return videoID
 		}
 	}
-	return extractVideoIDFromWatchEndpoint(value["watchEndpoint"])
+	if videoID := extractVideoIDFromWatchEndpoint(value["watchEndpoint"]); videoID != "" {
+		return videoID
+	}
+	return extractVideoIDDeep(value, 0)
+}
+
+func extractVideoIDDeep(value any, depth int) string {
+	if depth > 10 {
+		return ""
+	}
+	switch typed := value.(type) {
+	case map[string]any:
+		if videoID := extractVideoIDFromWatchEndpoint(typed["watchEndpoint"]); videoID != "" {
+			return videoID
+		}
+		if nested, ok := typed["playNavigationEndpoint"].(map[string]any); ok {
+			if videoID := extractVideoIDDeep(nested, depth+1); videoID != "" {
+				return videoID
+			}
+		}
+		for _, nested := range typed {
+			if videoID := extractVideoIDDeep(nested, depth+1); videoID != "" {
+				return videoID
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if videoID := extractVideoIDDeep(item, depth+1); videoID != "" {
+				return videoID
+			}
+		}
+	}
+	return ""
 }
 
 func extractVideoIDFromWatchEndpoint(value any) string {

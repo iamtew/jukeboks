@@ -58,6 +58,14 @@ const playerButtons = {
   autoplay: document.getElementById('autoplayButton'),
 };
 const songRequestInput = document.getElementById('songRequestInput');
+const seedStatusLine = document.getElementById('seedStatusLine');
+const seedPlaylistInput = document.getElementById('seedPlaylistInput');
+const addSeedPlaylistButton = document.getElementById('addSeedPlaylistButton');
+const seedInputFeedback = document.getElementById('seedInputFeedback');
+const clearQueueOnRequestCheckbox = document.getElementById('clearQueueOnRequestCheckbox');
+const seedPlaylistList = document.getElementById('seedPlaylistList');
+
+let seedStatusTimer = null;
 
 function updateSelection(selected) {
   if (!selected) return;
@@ -156,8 +164,203 @@ tabs.forEach((tab) => {
   tab.addEventListener('click', () => {
     tabs.forEach((item) => item.classList.toggle('active', item === tab));
     pages.forEach((page) => page.classList.toggle('active', page.id === `page-${tab.dataset.page}`));
+    if (tab.dataset.page === 'seed') {
+      loadSeedPanel();
+      startSeedStatusPolling();
+    } else {
+      stopSeedStatusPolling();
+    }
   });
 });
+
+async function loadSeedPanel() {
+  try {
+    const response = await fetch('/api/seed/status');
+    const payload = await readCommandEnvelope(response);
+    renderSeedPanel(payload.data || {});
+  } catch (err) {
+    if (seedStatusLine) {
+      seedStatusLine.textContent = `Seed mode: error (${err.message})`;
+    }
+  }
+}
+
+function renderSeedPanel(data) {
+  if (seedStatusLine) {
+    if (data.seedModeActive) {
+      const requests = Number(data.activeRequestCount) || 0;
+      const requestLabel = requests > 0
+        ? `${requests} request${requests === 1 ? '' : 's'} waiting`
+        : 'no requests waiting';
+      let playingLabel = 'idle';
+      if (data.playingKind === 'request') {
+        playingLabel = 'playing a request';
+      } else if (data.playingKind === 'seed') {
+        playingLabel = 'playing seed';
+      } else if (data.playingKind === 'other') {
+        playingLabel = 'playing other track';
+      }
+      seedStatusLine.textContent = `Jukebox mode: Active · ${playingLabel} · ${requestLabel}`;
+    } else {
+      seedStatusLine.textContent = 'Jukebox mode: Inactive (seed fallback off)';
+    }
+    seedStatusLine.classList.toggle('seed-status--active', Boolean(data.seedModeActive));
+  }
+  if (clearQueueOnRequestCheckbox) {
+    clearQueueOnRequestCheckbox.checked = Boolean(data.clearQueueOnRequest);
+  }
+  renderSeedPlaylists(data.seedPlaylists || []);
+}
+
+function renderSeedPlaylists(playlists) {
+  if (!seedPlaylistList) return;
+  seedPlaylistList.innerHTML = '';
+  if (!playlists.length) {
+    const item = document.createElement('li');
+    item.className = 'seed-list__empty';
+    item.textContent = 'No seed playlists saved yet';
+    seedPlaylistList.appendChild(item);
+    return;
+  }
+
+  playlists.forEach((playlist) => {
+    const item = document.createElement('li');
+    item.className = 'seed-list__item';
+
+    const labelButton = document.createElement('button');
+    labelButton.type = 'button';
+    labelButton.className = 'seed-list__label';
+    labelButton.textContent = `${playlist.trackCount || 0} - ${playlist.name || playlist.id}`;
+    labelButton.title = 'Add playlist to queue';
+    labelButton.addEventListener('click', () => enqueueSeedPlaylist(playlist.id));
+
+    const removeQueueButton = document.createElement('button');
+    removeQueueButton.type = 'button';
+    removeQueueButton.className = 'seed-list__action';
+    removeQueueButton.textContent = 'Remove from queue';
+    removeQueueButton.addEventListener('click', () => removeSeedTracksFromQueue(playlist.id));
+
+    const removeButton = document.createElement('button');
+    removeButton.type = 'button';
+    removeButton.className = 'seed-list__action seed-list__action--danger';
+    removeButton.textContent = 'Remove';
+    removeButton.addEventListener('click', () => removeSeedPlaylist(playlist.id));
+
+    const actions = document.createElement('div');
+    actions.className = 'seed-list__actions';
+    actions.append(removeQueueButton, removeButton);
+
+    item.append(labelButton, actions);
+    seedPlaylistList.appendChild(item);
+  });
+}
+
+async function addSeedPlaylist() {
+  if (!seedPlaylistInput) return;
+  const input = seedPlaylistInput.value.trim();
+  if (!input) return;
+  if (seedInputFeedback) seedInputFeedback.textContent = 'Adding playlist…';
+  try {
+    const response = await fetch('/api/seed/playlists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ input }),
+    });
+    const payload = await readCommandEnvelope(response);
+    seedPlaylistInput.value = '';
+    if (seedInputFeedback) seedInputFeedback.textContent = payload.message || 'Playlist saved';
+    await loadSeedPanel();
+    refreshQueueFromProxy();
+  } catch (err) {
+    if (seedInputFeedback) seedInputFeedback.textContent = err.message;
+  }
+}
+
+async function enqueueSeedPlaylist(playlistId) {
+  if (seedInputFeedback) seedInputFeedback.textContent = 'Adding tracks to queue…';
+  try {
+    const response = await fetch(`/cmd/jb/seed/enqueue?playlistId=${encodeURIComponent(playlistId)}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    });
+    const payload = await readCommandEnvelope(response);
+    if (seedInputFeedback) seedInputFeedback.textContent = payload.message || 'Playlist queued';
+    await loadSeedPanel();
+    refreshQueueFromProxy();
+  } catch (err) {
+    if (seedInputFeedback) seedInputFeedback.textContent = err.message;
+  }
+}
+
+async function removeSeedTracksFromQueue(playlistId) {
+  try {
+    const response = await fetch(`/cmd/jb/seed/queue?playlistId=${encodeURIComponent(playlistId)}`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+    });
+    const payload = await readCommandEnvelope(response);
+    if (seedInputFeedback) seedInputFeedback.textContent = payload.message || 'Seed tracks removed from queue';
+    await loadSeedPanel();
+    refreshQueueFromProxy();
+  } catch (err) {
+    if (seedInputFeedback) seedInputFeedback.textContent = err.message;
+  }
+}
+
+async function removeSeedPlaylist(playlistId) {
+  try {
+    const response = await fetch(`/api/seed/playlists/${encodeURIComponent(playlistId)}`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+    });
+    const payload = await readCommandEnvelope(response);
+    if (seedInputFeedback) seedInputFeedback.textContent = payload.message || 'Playlist removed';
+    await loadSeedPanel();
+  } catch (err) {
+    if (seedInputFeedback) seedInputFeedback.textContent = err.message;
+  }
+}
+
+async function saveSeedSettings(clearQueueOnRequest) {
+  try {
+    await fetch('/api/seed/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ clearQueueOnRequest }),
+    }).then(readCommandEnvelope);
+  } catch (err) {
+    if (seedInputFeedback) seedInputFeedback.textContent = err.message;
+  }
+}
+
+function startSeedStatusPolling() {
+  stopSeedStatusPolling();
+  seedStatusTimer = window.setInterval(loadSeedPanel, 5000);
+}
+
+function stopSeedStatusPolling() {
+  if (seedStatusTimer) {
+    window.clearInterval(seedStatusTimer);
+    seedStatusTimer = null;
+  }
+}
+
+if (addSeedPlaylistButton) {
+  addSeedPlaylistButton.addEventListener('click', addSeedPlaylist);
+}
+if (seedPlaylistInput) {
+  seedPlaylistInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      addSeedPlaylist();
+    }
+  });
+}
+if (clearQueueOnRequestCheckbox) {
+  clearQueueOnRequestCheckbox.addEventListener('change', () => {
+    saveSeedSettings(clearQueueOnRequestCheckbox.checked);
+  });
+}
 
 async function loadSettings() {
   try {
@@ -355,6 +558,9 @@ async function readCommandEnvelope(response) {
   }
 
   if (!response.ok) {
+    if (response.status === 404 && response.url.includes('/api/seed')) {
+      throw new Error('Seed API not found — restart jukeboks (just run) to load the latest server');
+    }
     const message = payload?.message || `status ${response.status}`;
     throw new Error(message);
   }

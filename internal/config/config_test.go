@@ -99,6 +99,36 @@ func TestStoreReloadsWhenFileChanges(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesSeedPlaylists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jukeboks.json")
+	if err := os.WriteFile(path, []byte(`{
+		"blacklist":["Artist"],
+		"maxDuration":600,
+		"seedPlaylists":[
+			{"id":" PL1 ","name":" One ","trackCount":3},
+			{"id":"PL1","name":"Duplicate","trackCount":9},
+			{"id":"","name":"Missing","trackCount":1}
+		],
+		"clearQueueOnRequest":true
+	}`), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(loaded.SeedPlaylists) != 1 {
+		t.Fatalf("seed playlists = %#v, want one deduped entry", loaded.SeedPlaylists)
+	}
+	if loaded.SeedPlaylists[0].ID != "PL1" || loaded.SeedPlaylists[0].Name != "One" || loaded.SeedPlaylists[0].TrackCount != 3 {
+		t.Fatalf("seed playlist = %#v", loaded.SeedPlaylists[0])
+	}
+	if !loaded.ClearQueueOnRequest {
+		t.Fatal("clearQueueOnRequest = false, want true")
+	}
+}
+
 func TestStoreSaveUpdatesMemory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "jukeboks.json")
 	store, err := NewStore(path)

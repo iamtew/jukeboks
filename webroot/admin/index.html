@@ -44,6 +44,7 @@
 
       <nav class="tabs" aria-label="Admin sections">
         <button class="tab active" data-page="queue">Queue</button>
+        <button class="tab" data-page="seed">Seed</button>
         <button class="tab" data-page="settings">Settings</button>
         <button class="tab" data-page="system">API</button>
       </nav>
@@ -55,6 +56,33 @@
             <button id="clearQueueButton" class="queue-toolbar-btn" type="button">Clear queue</button>
           </div>
           <div id="queueList" class="queue-list"></div>
+        </div>
+      </section>
+
+      <section id="page-seed" class="page">
+        <div class="panel">
+          <h3>Seed Playlists</h3>
+          <p class="muted">Fallback playlists for when the queue is empty. Song requests during seed playback are inserted after the current track.</p>
+          <p id="seedStatusLine" class="seed-status">Seed mode: loading…</p>
+          <div class="settings-block">
+            <label for="seedPlaylistInput">Add seed playlist</label>
+            <div class="url-row">
+              <input id="seedPlaylistInput" type="text" placeholder="Playlist URL or ID" />
+              <button id="addSeedPlaylistButton" type="button">Add</button>
+            </div>
+            <p id="seedInputFeedback" class="muted"></p>
+          </div>
+          <div class="settings-block">
+            <label class="seed-checkbox">
+              <input id="clearQueueOnRequestCheckbox" type="checkbox" />
+              Clear queue on new request
+            </label>
+            <p class="muted">When enabled, remaining seed playlist tracks are removed from the queue when a fresh song request arrives during seed mode.</p>
+          </div>
+          <div class="settings-block">
+            <h4>Saved seed playlists</h4>
+            <ul id="seedPlaylistList" class="seed-list"></ul>
+          </div>
         </div>
       </section>
 

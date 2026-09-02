@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -533,3 +534,202 @@ func TestSongRequestHandlerRequiresGET(t *testing.T) {
 		t.Fatalf("message = %q, want requires GET", env.Message)
 	}
 }
+
+const seedPlaylistSearchResponse = `{
+  "header": {
+    "musicDetailHeaderRenderer": {
+      "title": {"runs": [{"text": "Seed Mix"}]}
+    }
+  },
+  "contents": [
+    {"musicResponsiveListItemRenderer": {"videoId": "seed1111111", "title": {"runs": [{"text": "Seed One"}]}, "longBylineText": {"runs": [{"text": "Artist"}]}, "lengthText": {"runs": [{"text": "3:00"}]}}},
+    {"musicResponsiveListItemRenderer": {"videoId": "seed2222222", "title": {"runs": [{"text": "Seed Two"}]}, "longBylineText": {"runs": [{"text": "Artist"}]}, "lengthText": {"runs": [{"text": "3:00"}]}}}
+  ]
+}`
+
+const seedModeQueueResponse = `{"items":[{"playlistPanelVideoRenderer":{"videoId":"seed1111111","selected":true,"title":{"runs":[{"text":"Seed One"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:00"}]}}},{"playlistPanelVideoRenderer":{"videoId":"seed2222222","title":{"runs":[{"text":"Seed Two"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:00"}]}}}]}`
+
+const seedModeQueueWithRequestResponse = `{"items":[{"playlistPanelVideoRenderer":{"videoId":"seed1111111","selected":true,"title":{"runs":[{"text":"Seed One"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:00"}]}}},{"playlistPanelVideoRenderer":{"videoId":"req11111111","title":{"runs":[{"text":"Prior Request"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:30"}]}}},{"playlistPanelVideoRenderer":{"videoId":"seed2222222","title":{"runs":[{"text":"Seed Two"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:00"}]}}}]}`
+
+const seedModeQueueAfterNextUpResponse = `{"items":[{"playlistPanelVideoRenderer":{"videoId":"seed1111111","selected":true,"title":{"runs":[{"text":"Seed One"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:00"}]}}},{"playlistPanelVideoRenderer":{"videoId":"req12345678","title":{"runs":[{"text":"Request Song"}]},"longBylineText":{"runs":[{"text":"Request Artist"}]},"lengthText":{"runs":[{"text":"3:30"}]}}},{"playlistPanelVideoRenderer":{"videoId":"seed2222222","title":{"runs":[{"text":"Seed Two"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:00"}]}}}]}`
+
+const seedModeQueueAfterStackedInsertResponse = `{"items":[{"playlistPanelVideoRenderer":{"videoId":"seed1111111","selected":true,"title":{"runs":[{"text":"Seed One"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:00"}]}}},{"playlistPanelVideoRenderer":{"videoId":"req12345678","title":{"runs":[{"text":"Request Song"}]},"longBylineText":{"runs":[{"text":"Request Artist"}]},"lengthText":{"runs":[{"text":"3:30"}]}}},{"playlistPanelVideoRenderer":{"videoId":"req11111111","title":{"runs":[{"text":"Prior Request"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:30"}]}}},{"playlistPanelVideoRenderer":{"videoId":"seed2222222","title":{"runs":[{"text":"Seed Two"}]},"longBylineText":{"runs":[{"text":"Artist"}]},"lengthText":{"runs":[{"text":"3:00"}]}}}]}`
+
+const seedModeSearchResponse = `{"contents":{"tabbedSearchResultsRenderer":{"tabs":[{"tabRenderer":{"content":{"sectionListRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"videoId":"req12345678","title":{"runs":[{"text":"Request Song"}]},"longBylineText":{"runs":[{"text":"Request Artist"}]},"lengthText":{"runs":[{"text":"3:30"}]}}}]}}}}]}}}`
+
+func TestSongRequestHandlerUsesAfterCurrentInSeedMode(t *testing.T) {
+	var seenInsert string
+	moveSeen := false
+	inserted := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/search":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, seedModeSearchResponse)
+		case "/api/v1/song":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"videoId":"seed1111111","title":"Seed One","artist":"Artist"}`)
+		case "/api/v1/queue":
+			if r.Method == http.MethodGet {
+				w.Header().Set("Content-Type", "application/json")
+				if inserted {
+					_, _ = io.WriteString(w, seedModeQueueAfterNextUpResponse)
+					return
+				}
+				_, _ = io.WriteString(w, seedModeQueueResponse)
+				return
+			}
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if value, ok := body["insertPosition"].(string); ok {
+				seenInsert = value
+			}
+			inserted = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			if strings.HasPrefix(r.URL.Path, "/api/v1/queue/") && r.Method == http.MethodPatch {
+				moveSeen = true
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	webroot := filepath.Join(dir, "webroot")
+	if err := os.MkdirAll(webroot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store, err := config.NewStore(filepath.Join(dir, "jukeboks.json"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	target, _ := url.Parse(upstream.URL)
+	srv := New(store, ytmd.NewClient(target), webroot)
+	srv.Seed.RegisterEnqueue("PLseed", []string{"seed1111111", "seed2222222"})
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	resp, err := http.Get(testServer.URL + "/cmd/jb/songrequest?input=req12345678")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	env := decodeEnvelope(t, body)
+	if env.ExitCode != 0 {
+		t.Fatalf("exitCode = %d message = %q", env.ExitCode, env.Message)
+	}
+	if seenInsert != "INSERT_AFTER_CURRENT_VIDEO" {
+		t.Fatalf("insertPosition = %q, want INSERT_AFTER_CURRENT_VIDEO", seenInsert)
+	}
+	if moveSeen {
+		t.Fatal("first request should already land after current")
+	}
+}
+
+func TestSongRequestHandlerStacksRequestsBeforeSeedTracks(t *testing.T) {
+	var seenInsert string
+	var seenMoveFrom, seenMoveTo int
+	moveSeen := false
+	inserted := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/search":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, seedModeSearchResponse)
+		case "/api/v1/song":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"videoId":"seed1111111","title":"Seed One","artist":"Artist"}`)
+		case "/api/v1/queue":
+			switch r.Method {
+			case http.MethodGet:
+				w.Header().Set("Content-Type", "application/json")
+				if inserted {
+					_, _ = io.WriteString(w, seedModeQueueAfterStackedInsertResponse)
+					return
+				}
+				_, _ = io.WriteString(w, seedModeQueueWithRequestResponse)
+			case http.MethodPost:
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if value, ok := body["insertPosition"].(string); ok {
+					seenInsert = value
+				}
+				inserted = true
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				w.WriteHeader(http.StatusMethodNotAllowed)
+			}
+		default:
+			if strings.HasPrefix(r.URL.Path, "/api/v1/queue/") && r.Method == http.MethodPatch {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if toIndex, ok := body["toIndex"].(float64); ok {
+					parts := strings.Split(r.URL.Path, "/")
+					seenMoveFrom, _ = strconv.Atoi(parts[len(parts)-1])
+					seenMoveTo = int(toIndex)
+					moveSeen = true
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	webroot := filepath.Join(dir, "webroot")
+	if err := os.MkdirAll(webroot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store, err := config.NewStore(filepath.Join(dir, "jukeboks.json"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	target, _ := url.Parse(upstream.URL)
+	srv := New(store, ytmd.NewClient(target), webroot)
+	srv.Seed.RegisterEnqueue("PLseed", []string{"seed1111111", "seed2222222"})
+	srv.Seed.AppendRequest("req11111111")
+	testServer := httptest.NewServer(srv.Handler())
+	defer testServer.Close()
+
+	resp, err := http.Get(testServer.URL + "/cmd/jb/songrequest?input=req12345678")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	env := decodeEnvelope(t, body)
+	if env.ExitCode != 0 {
+		t.Fatalf("exitCode = %d message = %q", env.ExitCode, env.Message)
+	}
+	if seenInsert != "INSERT_AFTER_CURRENT_VIDEO" {
+		t.Fatalf("insertPosition = %q, want INSERT_AFTER_CURRENT_VIDEO", seenInsert)
+	}
+	if !moveSeen {
+		t.Fatal("expected queue move after inserting request")
+	}
+	if seenMoveFrom != 1 || seenMoveTo != 2 {
+		t.Fatalf("move = from %d to %d, want from 1 to 2", seenMoveFrom, seenMoveTo)
+	}
+}
+
+func TestSeedStatusEndpoint(t *testing.T) {
+	ts, _, _ := newTestEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	resp, err := http.Get(ts.URL + "/api/seed/status")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	env := decodeEnvelope(t, body)
+	if env.ExitCode != 0 {
+		t.Fatalf("exitCode = %d message = %q", env.ExitCode, env.Message)
+	}
+}
+

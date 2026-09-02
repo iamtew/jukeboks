@@ -9,6 +9,7 @@ import (
 
 	"jukeboks/internal/config"
 	"jukeboks/internal/policy"
+	"jukeboks/internal/seed"
 	"jukeboks/internal/ytmd"
 )
 
@@ -22,17 +23,24 @@ type Server struct {
 	Config  *config.Store
 	YTMD    *ytmd.Client
 	Webroot string
+	Seed    *seed.State
 }
 
 func New(cfg *config.Store, client *ytmd.Client, webroot string) *Server {
-	return &Server{Config: cfg, YTMD: client, Webroot: webroot}
+	return &Server{Config: cfg, YTMD: client, Webroot: webroot, Seed: seed.NewState()}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, Envelope{ExitCode: 0, Message: "ok"})
+		writeJSON(w, Envelope{
+			ExitCode: 0,
+			Message:  "ok",
+			Data: map[string]any{
+				"features": []string{"seed"},
+			},
+		})
 	})
 
 	mux.HandleFunc("/cmd/ytmd/", s.proxyToYTMD)
@@ -54,6 +62,9 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	mux.HandleFunc("/api/config", s.configHandler)
+	s.registerSeedRoutes(mux)
+
+	mux.HandleFunc("/api/", s.apiNotFoundHandler)
 
 	mux.Handle("/", http.FileServer(http.Dir(s.Webroot)))
 
@@ -177,14 +188,44 @@ func (s *Server) songRequestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queuePayload, err = s.YTMD.PostJSON(r.Context(), "/api/v1/queue", map[string]any{
-		"videoId":        videoID,
-		"insertPosition": "INSERT_AT_END",
-	})
-	if err != nil {
-		writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach queue endpoint: %v", err)})
-		return
+	insertPosition := "INSERT_AT_END"
+	var queueAfterInsert any
+	if s.Seed.IsActive() {
+		currentVideoID := ytmd.CurrentSongVideoID(songPayload)
+		if cfg.ClearQueueOnRequest {
+			seedVideoIDs := s.Seed.VideoIDSet()
+			if err := s.removeUpcomingSeedTracks(r.Context(), queuePayload, seedVideoIDs, currentVideoID); err != nil {
+				writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to clear seed queue: %v", err)})
+				return
+			}
+			queuePayload, err = s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/queue", 3, 250*time.Millisecond)
+			if err != nil {
+				writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach queue endpoint: %v", err)})
+				return
+			}
+		}
+		queueAfterInsert, err = s.insertRequestDuringSeedMode(r.Context(), queuePayload, songPayload, videoID)
+		if err != nil {
+			writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach queue endpoint: %v", err)})
+			return
+		}
+	} else {
+		queueAfterInsert, err = s.YTMD.PostJSON(r.Context(), "/api/v1/queue", map[string]any{
+			"videoId":        videoID,
+			"insertPosition": insertPosition,
+		})
+		if err != nil {
+			writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach queue endpoint: %v", err)})
+			return
+		}
 	}
+
+	queuePayload = queueAfterInsert
+	if freshQueue, fetchErr := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/queue", 3, 250*time.Millisecond); fetchErr == nil {
+		queuePayload = freshQueue
+	}
+
+	s.Seed.ReconcileQueue(queuePayload, ytmd.CurrentSongVideoID(songPayload))
 
 	writeJSON(w, ytmd.BuildSongRequestResponse(videoID, queuePayload, lookup))
 }
