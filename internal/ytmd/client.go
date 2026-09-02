@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"jukeboks/internal/httplog"
 )
 
 const defaultTimeout = 5 * time.Second
@@ -41,7 +43,17 @@ func NewClient(base *url.URL) *Client {
 }
 
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
-	return c.HTTP.Do(req)
+	start := time.Now()
+	resp, err := c.HTTP.Do(req)
+	duration := time.Since(start)
+
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	httplog.LogUpstream(req.Context(), req.Method, req.URL.String(), status, duration)
+
+	return resp, err
 }
 
 func (c *Client) FetchJSONWithRetry(ctx context.Context, endpoint string, attempts int, delay time.Duration) (any, error) {
@@ -60,7 +72,7 @@ func (c *Client) FetchJSONWithRetry(ctx context.Context, endpoint string, attemp
 			return nil, err
 		}
 
-		resp, err := c.HTTP.Do(req)
+		resp, err := c.Do(req)
 		if err != nil {
 			lastErr = err
 			if attempt < attempts-1 {
@@ -112,7 +124,7 @@ func (c *Client) PostJSON(ctx context.Context, endpoint string, body any) (any, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -57,7 +57,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.Handle("/", http.FileServer(http.Dir(s.Webroot)))
 
-	return mux
+	return loggingMiddleware(mux)
 }
 
 func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"jukeboks/internal/config"
+	"jukeboks/internal/httplog"
 	"jukeboks/internal/server"
 	"jukeboks/internal/ytmd"
 )
@@ -28,7 +29,13 @@ func main() {
 	ytmdPort := flag.String("ytmd_port", "26538", "YTMD port")
 	webrootFlag := flag.String("webroot", "", "path to webroot directory")
 	configFlag := flag.String("config", "", "path to jukeboks.json")
+	noColor := flag.Bool("no-color", false, "disable colored HTTP log output")
 	flag.Parse()
+
+	if *noColor {
+		httplog.UseColor = false
+	}
+	httplog.InitColor()
 
 	webroot := resolvePath(*webrootFlag, "webroot")
 	configPath := resolvePath(*configFlag, "jukeboks.json")

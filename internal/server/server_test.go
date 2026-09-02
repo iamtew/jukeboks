@@ -12,11 +12,17 @@ import (
 	"testing"
 
 	"jukeboks/internal/config"
+	"jukeboks/internal/httplog"
 	"jukeboks/internal/ytmd"
 )
 
 func newTestEnv(t *testing.T, ytmdHandler http.Handler) (*httptest.Server, *httptest.Server, string) {
 	t.Helper()
+
+	httplog.SetEnabled(false)
+	t.Cleanup(func() {
+		httplog.SetEnabled(true)
+	})
 
 	upstream := httptest.NewServer(ytmdHandler)
 	t.Cleanup(upstream.Close)
