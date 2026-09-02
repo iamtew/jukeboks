@@ -229,7 +229,7 @@ The proxy is generic: any `/cmd/ytmd/<path>` maps to `/api/v1/<path>` even if it
 
 **Admin Queue**
 
-- Polls `GET /cmd/ytmd/queue/get` (one row per `items[i]`, including duplicates).
+- Now-playing and shuffle update via YTMD WebSocket; queue falls back to `GET /cmd/ytmd/queue/get` on a 30s timer (or 10s when the socket is down).
 - Highlights current via `selected` / `videoId` / exact title+artist.
 - Works while **paused** (unlike `/cmd/jb/queueinfo`).
 - Per-row Play → `PATCH …/queue/patch` `{ index }`; Delete → `DELETE …/queue/{index}/delete`.

@@ -290,6 +290,61 @@ let queueDragActive = false;
 let queueDragFromIndex = null;
 let queueMoveInFlight = false;
 let queuePointerDrag = null;
+let queueRefreshDebounceTimer = null;
+let pollTimer = null;
+
+const POLL_INTERVAL_WS_MS = 30000;
+const POLL_INTERVAL_NO_WS_MS = 10000;
+
+function isNowPlayingSocketOpen() {
+  return window.__jukeboksSocket?.readyState === WebSocket.OPEN;
+}
+
+function scheduleQueueRefreshFromWS(delayMs = 800) {
+  window.clearTimeout(queueRefreshDebounceTimer);
+  queueRefreshDebounceTimer = window.setTimeout(() => {
+    refreshQueueFromProxy();
+  }, delayMs);
+}
+
+function refreshPlaybackFromProxyIfNeeded() {
+  if (!isNowPlayingSocketOpen()) {
+    refreshNowPlayingFromProxy();
+    refreshShuffleFromProxy();
+  }
+}
+
+function startPolling() {
+  window.clearInterval(pollTimer);
+  const intervalMs = isNowPlayingSocketOpen() ? POLL_INTERVAL_WS_MS : POLL_INTERVAL_NO_WS_MS;
+  pollTimer = window.setInterval(() => {
+    if (isNowPlayingSocketOpen()) {
+      refreshQueueFromProxy();
+    } else {
+      refreshNowPlayingFromProxy();
+      refreshQueueFromProxy();
+      refreshShuffleFromProxy();
+    }
+  }, intervalMs);
+}
+
+function applyPositionFromWS(position) {
+  playbackState.position = Math.max(0, Number(position) || 0);
+  if (playbackState.hasSong) {
+    playState.textContent = playbackState.isPaused ? '⏸' : '▶';
+  }
+  currentTime.textContent = formatTime(playbackState.position);
+  updateProgressBar();
+}
+
+function applyPlayerStateFromWS(data) {
+  const isPaused = typeof data.isPlaying === 'boolean' ? !data.isPlaying : Boolean(data.isPaused);
+  playbackState.isPaused = isPaused;
+  if (playbackState.hasSong) {
+    playState.textContent = isPaused ? '⏸' : '▶';
+  }
+  updatePlaybackButtons();
+}
 
 async function readCommandEnvelope(response) {
   let payload = null;
@@ -1595,7 +1650,7 @@ function connectNowPlaying() {
   socket.onopen = () => {
     setCurrentMetaText('Listening for YTMD…');
     currentMeta.classList.remove('is-marquee');
-    refreshNowPlayingFromProxy();
+    startPolling();
   };
   socket.onmessage = (event) => {
     try {
@@ -1605,11 +1660,30 @@ function connectNowPlaying() {
         updatePlaybackButtons();
         return;
       }
-      if (data?.type === 'PLAYER_INFO' || data?.type === 'VIDEO_CHANGED' || data?.type === 'PLAYER_STATE_CHANGED' || data?.type === 'POSITION_CHANGED' || data?.song || data?.position || data?.isPaused || data?.artist || data?.title) {
+      if (data?.type === 'POSITION_CHANGED') {
+        applyPositionFromWS(data.position);
+        return;
+      }
+      if (data?.type === 'PLAYER_STATE_CHANGED') {
+        applyPlayerStateFromWS(data);
+        return;
+      }
+      if (data?.type === 'PLAYER_INFO' || data?.type === 'VIDEO_CHANGED') {
         applyNowPlaying(data);
-        window.setTimeout(() => {
-          refreshQueueFromProxy();
-        }, 250);
+        scheduleQueueRefreshFromWS();
+        return;
+      }
+      if (data?.song || data?.artist || data?.title) {
+        applyNowPlaying(data);
+        scheduleQueueRefreshFromWS();
+        return;
+      }
+      if (data?.position != null && !data?.song && !data?.title && !data?.artist) {
+        applyPositionFromWS(data.position);
+        return;
+      }
+      if (typeof data?.isPaused === 'boolean') {
+        applyPlayerStateFromWS(data);
       }
     } catch (err) {
       console.error('Failed to parse YTMD socket payload', err);
@@ -1619,6 +1693,7 @@ function connectNowPlaying() {
     setCurrentMetaText('YTMD socket unavailable');
   };
   socket.onclose = () => {
+    startPolling();
     window.setTimeout(connectNowPlaying, 2000);
   };
   window.__jukeboksSocket = socket;
@@ -1759,22 +1834,16 @@ refreshNowPlayingFromProxy();
 refreshQueueFromProxy();
 refreshShuffleFromProxy();
 connectNowPlaying();
-window.setInterval(() => {
-  refreshNowPlayingFromProxy();
-  refreshQueueFromProxy();
-  refreshShuffleFromProxy();
-}, 10000);
+startPolling();
 window.addEventListener('resize', updateCurrentMetaMarquee);
 window.addEventListener('focus', () => {
-  refreshNowPlayingFromProxy();
-  refreshShuffleFromProxy();
+  refreshPlaybackFromProxyIfNeeded();
   connectNowPlaying();
   updateCurrentMetaMarquee();
 });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
-    refreshNowPlayingFromProxy();
-    refreshShuffleFromProxy();
+    refreshPlaybackFromProxyIfNeeded();
     connectNowPlaying();
     updateCurrentMetaMarquee();
   }
