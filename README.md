@@ -1,12 +1,16 @@
 # jukeboks
 
-Streamer.bot • YouTube Music • OBS — a lightweight control layer for YouTube Music Desktop.
+A lightweight control layer for YouTube Music Desktop.
 
 Jukeboks is a local Go HTTP server that sits in front of [YouTube Music Desktop (YTMD / pear-desktop)](https://github.com/pear-devs/pear-desktop/) and turns it into a streamer control plane. Chat bots can drive playback, OBS can show a now-playing overlay, and a small admin dock can babysit the queue.
 
 No database. No auth. One process, one config file, one `webroot/` of vanilla HTML/CSS/JS.
 
 **Default base URL:** `http://localhost:42420`
+
+Can easily be integrated into your stream using a bot, for example:
+- [Streamer.bot](https://streamer.bot/)
+- [Kruiz Control](https://github.com/Kruiser8/Kruiz-Control)
 
 ---
 
