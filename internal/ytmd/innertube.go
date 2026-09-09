@@ -11,7 +11,11 @@ import (
 	"time"
 )
 
-const innertubeBrowseURL = "https://music.youtube.com/youtubei/v1/browse?alt=json&key=AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
+// innertubeAPIKey is YouTube Music's public WEB_REMIX InnerTube client key
+// (shipped in the YT Music web client; not a private credential).
+const innertubeAPIKey = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
+
+const innertubeBrowseURL = "https://music.youtube.com/youtubei/v1/browse?alt=json&key=" + innertubeAPIKey
 
 const innertubeUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
 
