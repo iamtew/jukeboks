@@ -84,6 +84,61 @@ func TestExtractPlaylistNameIgnoresTrackTitles(t *testing.T) {
 	}
 }
 
+func TestExtractPlaylistNameFromResponsiveHeader(t *testing.T) {
+	payload := map[string]any{
+		"contents": map[string]any{
+			"twoColumnBrowseResultsRenderer": map[string]any{
+				"tabs": []any{
+					map[string]any{
+						"tabRenderer": map[string]any{
+							"content": map[string]any{
+								"sectionListRenderer": map[string]any{
+									"contents": []any{
+										map[string]any{
+											"musicResponsiveHeaderRenderer": map[string]any{
+												"title": map[string]any{
+													"runs": []any{map[string]any{"text": "Late Night Drive"}},
+												},
+											},
+										},
+										map[string]any{
+											"musicPlaylistShelfRenderer": map[string]any{
+												"contents": []any{
+													map[string]any{
+														"musicResponsiveListItemRenderer": map[string]any{
+															"videoId": "abc12345678",
+															"title": map[string]any{
+																"runs": []any{map[string]any{"text": "Track One"}},
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	name := extractPlaylistName(payload)
+	if name != "Late Night Drive" {
+		t.Fatalf("name = %q, want Late Night Drive", name)
+	}
+
+	lookup, ok := parsePlaylistPayload("PLresponsive123", payload)
+	if !ok {
+		t.Fatal("parsePlaylistPayload() ok = false, want true")
+	}
+	if lookup.Name != "Late Night Drive" {
+		t.Fatalf("lookup.Name = %q, want Late Night Drive", lookup.Name)
+	}
+}
+
 func TestQueueIndicesForVideoIDs(t *testing.T) {
 	payload := map[string]any{
 		"items": []any{

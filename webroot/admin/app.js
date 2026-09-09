@@ -230,8 +230,12 @@ function renderSeedPlaylists(playlists) {
     const labelButton = document.createElement('button');
     labelButton.type = 'button';
     labelButton.className = 'seed-list__label';
-    labelButton.textContent = `${playlist.trackCount || 0} - ${playlist.name || playlist.id}`;
-    labelButton.title = 'Add playlist to queue';
+    const displayName = playlist.name || playlist.id || '';
+    const labelText = `${playlist.trackCount || 0} - ${displayName}`;
+    labelButton.textContent = labelText;
+    labelButton.title = playlist.id && playlist.name && playlist.name !== playlist.id
+      ? `${labelText} (${playlist.id})`
+      : labelText;
     labelButton.addEventListener('click', () => enqueueSeedPlaylist(playlist.id));
 
     const removeQueueButton = document.createElement('button');

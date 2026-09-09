@@ -95,6 +95,12 @@ func extractPlaylistName(payload any) string {
 		switch typed := value.(type) {
 		case map[string]any:
 			if header, ok := typed["header"].(map[string]any); ok {
+				if renderer, ok := header["musicResponsiveHeaderRenderer"].(map[string]any); ok {
+					if title := extractTextFromRunsCommand(renderer["title"]); title != "" {
+						found = title
+						return
+					}
+				}
 				if renderer, ok := header["musicDetailHeaderRenderer"].(map[string]any); ok {
 					if title := extractTextFromRunsCommand(renderer["title"]); title != "" {
 						found = title
@@ -112,6 +118,12 @@ func extractPlaylistName(payload any) string {
 						found = title
 						return
 					}
+				}
+			}
+			if header, ok := typed["musicResponsiveHeaderRenderer"].(map[string]any); ok {
+				if title := extractTextFromRunsCommand(header["title"]); title != "" {
+					found = title
+					return
 				}
 			}
 			if header, ok := typed["musicDetailHeaderRenderer"].(map[string]any); ok {
