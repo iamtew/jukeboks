@@ -46,6 +46,25 @@ func TestNormalizeAdminQueueKinds(t *testing.T) {
 	}
 }
 
+func TestNormalizeAdminQueueNilSongUsesSelected(t *testing.T) {
+	queuePayload := map[string]any{
+		"items": []any{
+			rendererEntry("Prev", "A", "3:00", "prev11111111"),
+			rendererEntry("Now", "B", "3:00", "now222222222"),
+		},
+	}
+	items := queuePayload["items"].([]any)
+	items[1].(map[string]any)["playlistPanelVideoRenderer"].(map[string]any)["selected"] = true
+
+	got, status := NormalizeAdminQueue(nil, queuePayload)
+	if status != "ok" {
+		t.Fatalf("status = %q, want ok", status)
+	}
+	if got[1].Kind != "current" {
+		t.Fatalf("kind = %q, want current when song payload is nil", got[1].Kind)
+	}
+}
+
 func TestNormalizeAdminQueueEmpty(t *testing.T) {
 	_, status := NormalizeAdminQueue(nil, map[string]any{"items": []any{}})
 	if status != "empty" {

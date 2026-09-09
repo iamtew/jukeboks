@@ -473,7 +473,7 @@ let queueMoveInFlight = false;
 let queueRefreshDebounceTimer = null;
 let pollTimer = null;
 
-const POLL_INTERVAL_WS_MS = 30000;
+const POLL_INTERVAL_WS_MS = 5000; // queue has no WS event; song switches already refresh sooner
 const POLL_INTERVAL_NO_WS_MS = 10000;
 
 function isNowPlayingSocketOpen() {
@@ -485,6 +485,14 @@ function scheduleQueueRefreshFromWS(delayMs = 800) {
   queueRefreshDebounceTimer = window.setTimeout(() => {
     refreshQueueFromProxy();
   }, delayMs);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function refreshPlaybackFromProxyIfNeeded() {
@@ -576,7 +584,7 @@ function shouldHandleQueueAction(event) {
 }
 
 function setQueueActionFeedback(message, kind = 'success') {
-  queueActionFeedback = { message, kind };
+  queueActionFeedback = { message: String(message || ''), kind };
   renderQueue();
 
   if (queueActionFeedbackTimer) {
@@ -779,11 +787,17 @@ function bindQueueDragDrop() {
     clearQueueDragState();
     if (Number.isFinite(fromIndex) && Number.isFinite(toIndex) && fromIndex !== toIndex) {
       await moveQueueItem(fromIndex, toIndex);
+    } else {
+      scheduleQueueRefreshFromWS(0);
     }
   });
 
   queueList.addEventListener('dragend', () => {
+    const wasDragging = queueDragActive;
     clearQueueDragState();
+    if (wasDragging && !queueMoveInFlight) {
+      scheduleQueueRefreshFromWS(0);
+    }
   });
 }
 
@@ -887,7 +901,7 @@ function renderQueue() {
   if (queueDragActive || queueMoveInFlight) return;
 
   const feedbackMarkup = queueActionFeedback
-    ? `<div class="queue-feedback queue-feedback--${queueActionFeedback.kind}">${queueActionFeedback.message}</div>`
+    ? `<div class="queue-feedback queue-feedback--${escapeHtml(queueActionFeedback.kind)}">${escapeHtml(queueActionFeedback.message)}</div>`
     : '';
 
   if (playbackState.queueStatus === 'unavailable') {
@@ -915,7 +929,7 @@ function renderQueue() {
   }
 
   const buildItem = (item, kind) => {
-    const displayText = [item.artist, item.title].filter(Boolean).join(' - ');
+    const displayText = escapeHtml([item.artist, item.title].filter(Boolean).join(' - '));
     const classes = [`queue-item`, kind === 'current' ? 'is-current' : '', kind === 'previous' ? 'is-previous' : ''].filter(Boolean).join(' ');
     const queueIndex = Number.isFinite(item?.queueIndex) ? item.queueIndex : '';
     const actionsDisabled = !Number.isFinite(item?.queueIndex);
@@ -964,6 +978,7 @@ function renderQueue() {
 
 async function refreshQueueFromProxy() {
   if (queueDragActive || queueMoveInFlight) {
+    scheduleQueueRefreshFromWS(400);
     return;
   }
 
@@ -972,6 +987,9 @@ async function refreshQueueFromProxy() {
     const response = await fetch('/api/queue', { headers: { Accept: 'application/json' } });
     const payload = await response.json();
     if (requestId !== queueRefreshToken || queueDragActive || queueMoveInFlight) {
+      if (queueDragActive || queueMoveInFlight) {
+        scheduleQueueRefreshFromWS(400);
+      }
       return;
     }
 
@@ -990,6 +1008,9 @@ async function refreshQueueFromProxy() {
     renderQueue();
   } catch (err) {
     if (requestId !== queueRefreshToken || queueDragActive || queueMoveInFlight) {
+      if (queueDragActive || queueMoveInFlight) {
+        scheduleQueueRefreshFromWS(400);
+      }
       return;
     }
     playbackState.queue = [];

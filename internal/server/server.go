@@ -103,12 +103,9 @@ func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminQueueHandler(w http.ResponseWriter, r *http.Request) {
-	songPayload, err := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/song", 3, 250*time.Millisecond)
-	if err != nil {
-		writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach song endpoint: %v", err), Data: map[string]any{"status": "unavailable"}})
-		return
-	}
-	queuePayload, err := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/queue", 3, 250*time.Millisecond)
+	// Song is optional: selected-flag on queue items is enough to classify current.
+	songPayload, _ := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/song", 2, 100*time.Millisecond)
+	queuePayload, err := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/queue", 2, 100*time.Millisecond)
 	if err != nil {
 		writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach queue endpoint: %v", err), Data: map[string]any{"status": "unavailable"}})
 		return
