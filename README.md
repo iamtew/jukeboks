@@ -78,7 +78,9 @@ Add a song to the **end** of the YTMD queue. Accepts a bare YouTube video ID, an
 | **Message example** | `Added to queue: Title — Artist.` |
 | **Data** | `{ "videoId", "title", "artist" }` — title/artist when YTMD returns them |
 | **Missing input** | `exitCode: 1`, message mentions missing input |
-| **No search results** | `exitCode: 1`, message mentions `no search results` (text query with no YTMD hits) |
+| **No search results** | `exitCode: 1`, message mentions `no matching search results` (text query with no sufficiently relevant YTMD hits) |
+| **Unsupported URL** | `exitCode: 1`, `unsupported or invalid YouTube URL` — non-YouTube links, playlist-only links, and other URL-like input that cannot be resolved to a video ID are rejected (not searched) |
+| **Input too long** | `exitCode: 1`, `input too long` — rejects inputs over 2048 bytes before upstream calls |
 | **Policy** | Respects `jukeboks.json` blacklist and `maxDuration` — looks up title/artist/duration via YTMD search before queueing |
 | **Blocked** | `exitCode: 1`, e.g. `request blocked by blacklist entry "Rick Astley"` or duration exceeds `maxDuration` |
 | **Duplicate** | `exitCode: 1`, `data.reason: "duplicate"` — skips if the video ID is already in the queue or currently playing |
@@ -91,7 +93,7 @@ http://localhost:42420/cmd/jb/songrequest?input=https://music.youtube.com/watch?
 http://localhost:42420/cmd/jb/songrequest?input=never+gonna+give+you+up
 ```
 
-Supported `input` formats: bare video ID, `youtube.com/watch?v=`, `music.youtube.com/watch?v=`, `youtu.be/`, `/embed/`, `/shorts/`, scheme-less `youtu.be/...` links, or any text query (first YTMD search result is queued).
+Supported `input` formats: bare video ID, `youtube.com/watch?v=`, `music.youtube.com/watch?v=`, `youtu.be/`, `/embed/`, `/shorts/`, scheme-less `youtu.be/...` links, or any text query (best matching YTMD search result is queued when title/artist overlap the query). URL-like input that is not a supported YouTube video link fails instead of falling through to search.
 
 ### Seed playlists
 

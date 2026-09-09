@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 type SongLookup struct {
@@ -20,9 +21,9 @@ func LookupSongByQuery(ctx context.Context, client *Client, query string) (strin
 		return "", SongLookup{}, err
 	}
 
-	entry, ok := findFirstSearchResult(payload)
+	entry, ok := findBestSearchResult(payload, query)
 	if !ok || entry.VideoID == "" {
-		return "", SongLookup{}, fmt.Errorf("no search results for %q", query)
+		return "", SongLookup{}, fmt.Errorf("no matching search results for %q", query)
 	}
 
 	return entry.VideoID, SongLookup{
@@ -100,8 +101,42 @@ func findQueueEntryForVideoID(payload any, videoID string) (queueEntrySummary, b
 }
 
 func findFirstSearchResult(payload any) (queueEntrySummary, bool) {
-	var found queueEntrySummary
-	var ok bool
+	entries := collectSearchResults(payload, 1)
+	if len(entries) == 0 {
+		return queueEntrySummary{}, false
+	}
+	return entries[0], true
+}
+
+func findBestSearchResult(payload any, query string) (queueEntrySummary, bool) {
+	entries := collectSearchResults(payload, 40)
+	if len(entries) == 0 {
+		return queueEntrySummary{}, false
+	}
+
+	bestIdx := -1
+	bestScore := -1
+	for i, entry := range entries {
+		score, matched := queryRelevanceScore(query, entry.Title, entry.Artist)
+		if !matched {
+			continue
+		}
+		if score > bestScore {
+			bestScore = score
+			bestIdx = i
+		}
+	}
+	if bestIdx < 0 {
+		return queueEntrySummary{}, false
+	}
+	return entries[bestIdx], true
+}
+
+func collectSearchResults(payload any, limit int) []queueEntrySummary {
+	if limit <= 0 {
+		return nil
+	}
+	out := make([]queueEntrySummary, 0, min(limit, 16))
 
 	var consider func(map[string]any) bool
 	consider = func(value map[string]any) bool {
@@ -109,8 +144,8 @@ func findFirstSearchResult(payload any) (queueEntrySummary, bool) {
 		if entry.VideoID == "" {
 			return false
 		}
-		found = entry
-		return true
+		out = append(out, entry)
+		return len(out) >= limit
 	}
 
 	var walk func(any) bool
@@ -142,8 +177,104 @@ func findFirstSearchResult(payload any) (queueEntrySummary, bool) {
 		return false
 	}
 
-	ok = walk(payload)
-	return found, ok
+	walk(payload)
+	return out
+}
+
+func queryRelevanceScore(query, title, artist string) (score int, matched bool) {
+	queryNorm := normalizeMatchText(query)
+	haystack := normalizeMatchText(strings.TrimSpace(title + " " + artist))
+	if queryNorm == "" || haystack == "" {
+		return 0, false
+	}
+
+	if queryNorm == haystack || strings.Contains(haystack, queryNorm) {
+		return 1000 + len(queryNorm), true
+	}
+
+	tokens := significantQueryTokens(queryNorm)
+	if len(tokens) == 0 {
+		return 0, false
+	}
+
+	matchedCount := 0
+	titleNorm := normalizeMatchText(title)
+	for _, token := range tokens {
+		if strings.Contains(haystack, token) {
+			matchedCount++
+			if strings.Contains(titleNorm, token) {
+				score += 15
+			} else {
+				score += 5
+			}
+		}
+	}
+
+	minRequired := (len(tokens) + 1) / 2
+	if len(tokens) <= 2 {
+		minRequired = len(tokens)
+	}
+	if matchedCount < minRequired {
+		return matchedCount, false
+	}
+
+	score += matchedCount * 100
+	score += (matchedCount * 100) / len(tokens)
+	return score, true
+}
+
+func significantQueryTokens(normalizedQuery string) []string {
+	parts := strings.Fields(normalizedQuery)
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		if isMatchStopword(part) {
+			continue
+		}
+		if utf8.RuneCountInString(part) < 2 {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	return out
+}
+
+func normalizeMatchText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(value))
+	lastSpace := true
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastSpace = false
+		default:
+			if !lastSpace {
+				b.WriteByte(' ')
+				lastSpace = true
+			}
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func isMatchStopword(token string) bool {
+	switch token {
+	case "a", "an", "the", "and", "or", "of", "to", "for", "in", "on", "at", "by",
+		"ft", "feat", "featuring", "with", "vs", "versus", "official", "video", "audio",
+		"lyrics", "lyric", "hd", "hq", "mv":
+		return true
+	default:
+		return false
+	}
 }
 
 func enrichSearchEntry(value map[string]any, entry queueEntrySummary) queueEntrySummary {

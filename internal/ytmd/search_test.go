@@ -231,6 +231,101 @@ func TestFindFirstSearchResultReturnsFirstMatch(t *testing.T) {
 	}
 }
 
+func TestFindBestSearchResultSkipsUnrelatedTopHit(t *testing.T) {
+	payload := map[string]any{
+		"contents": []any{
+			map[string]any{
+				"musicCardShelfRenderer": map[string]any{
+					"title": map[string]any{
+						"runs": []any{map[string]any{"text": "Totally Unrelated Mix"}},
+					},
+					"subtitle": map[string]any{
+						"runs": []any{map[string]any{"text": "Random DJ"}},
+					},
+					"onTap": map[string]any{
+						"watchEndpoint": map[string]any{"videoId": "random123456"},
+					},
+				},
+			},
+			map[string]any{
+				"musicCardShelfRenderer": map[string]any{
+					"title": map[string]any{
+						"runs": []any{map[string]any{"text": "Never Gonna Give You Up"}},
+					},
+					"subtitle": map[string]any{
+						"runs": []any{
+							map[string]any{"text": "Song"},
+							map[string]any{"text": " • "},
+							map[string]any{"text": "Rick Astley"},
+						},
+					},
+					"onTap": map[string]any{
+						"watchEndpoint": map[string]any{"videoId": "dQw4w9WgXcQ"},
+					},
+				},
+			},
+		},
+	}
+
+	entry, ok := findBestSearchResult(payload, "never gonna give you up rick astley")
+	if !ok {
+		t.Fatal("findBestSearchResult() ok = false, want true")
+	}
+	if entry.VideoID != "dQw4w9WgXcQ" {
+		t.Fatalf("videoId = %q, want dQw4w9WgXcQ", entry.VideoID)
+	}
+}
+
+func TestFindBestSearchResultRejectsNoMatch(t *testing.T) {
+	payload := map[string]any{
+		"contents": []any{
+			map[string]any{
+				"musicCardShelfRenderer": map[string]any{
+					"title": map[string]any{
+						"runs": []any{map[string]any{"text": "Completely Different Track"}},
+					},
+					"subtitle": map[string]any{
+						"runs": []any{map[string]any{"text": "Other Artist"}},
+					},
+					"onTap": map[string]any{
+						"watchEndpoint": map[string]any{"videoId": "other1234567"},
+					},
+				},
+			},
+		},
+	}
+
+	_, ok := findBestSearchResult(payload, "never gonna give you up")
+	if ok {
+		t.Fatal("findBestSearchResult() ok = true, want false")
+	}
+}
+
+func TestQueryRelevanceScore(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   string
+		title   string
+		artist  string
+		matched bool
+	}{
+		{name: "exact title", query: "never gonna give you up", title: "Never Gonna Give You Up", artist: "Rick Astley", matched: true},
+		{name: "artist only query", query: "rick astley", title: "Never Gonna Give You Up", artist: "Rick Astley", matched: true},
+		{name: "unrelated", query: "enter sandman", title: "Bohemian Rhapsody", artist: "Queen", matched: false},
+		{name: "partial weak", query: "never gonna give you up", title: "Up", artist: "Someone", matched: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, matched := queryRelevanceScore(tt.query, tt.title, tt.artist)
+			if matched != tt.matched {
+				t.Fatalf("queryRelevanceScore(%q, %q, %q) matched = %v, want %v",
+					tt.query, tt.title, tt.artist, matched, tt.matched)
+			}
+		})
+	}
+}
+
 func TestFindFirstSearchResultEmpty(t *testing.T) {
 	_, ok := findFirstSearchResult(map[string]any{})
 	if ok {

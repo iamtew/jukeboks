@@ -147,11 +147,19 @@ func (s *Server) songRequestHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, Envelope{ExitCode: 1, Message: "missing input parameter"})
 		return
 	}
+	if len(input) > ytmd.MaxSongRequestInputLen {
+		writeJSON(w, Envelope{ExitCode: 1, Message: "input too long"})
+		return
+	}
 
-	videoID, err := ytmd.ExtractVideoID(input)
+	videoID, urlLike := ytmd.ClassifySongRequestInput(input)
 	var lookup ytmd.SongLookup
-	if err == nil {
+	var err error
+	if videoID != "" {
 		lookup, err = ytmd.LookupSongByVideoID(r.Context(), s.YTMD, videoID)
+	} else if urlLike {
+		writeJSON(w, Envelope{ExitCode: 1, Message: "unsupported or invalid YouTube URL"})
+		return
 	} else {
 		videoID, lookup, err = ytmd.LookupSongByQuery(r.Context(), s.YTMD, input)
 	}

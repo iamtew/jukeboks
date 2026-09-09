@@ -319,6 +319,91 @@ func TestSongRequestHandlerExtractsFromURL(t *testing.T) {
 	}
 }
 
+func TestSongRequestHandlerRejectsUnsupportedURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{name: "spotify", input: "https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl"},
+		{name: "playlist only", input: "https://www.youtube.com/playlist?list=PLtest123456"},
+		{name: "garbage https", input: "https://example.com/not-a-song"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queueCalled := false
+			ts, _, _ := newTestEnv(t, ytmdSongRequestHandler(t, testSearchResponse, emptyQueueResponse, func(r *http.Request) {
+				queueCalled = true
+			}))
+
+			resp, err := http.Get(ts.URL + "/cmd/jb/songrequest?input=" + url.QueryEscape(tt.input))
+			if err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			env := decodeEnvelope(t, body)
+			if env.ExitCode != 1 {
+				t.Fatalf("exitCode = %d, want 1", env.ExitCode)
+			}
+			if !strings.Contains(env.Message, "unsupported or invalid YouTube URL") {
+				t.Fatalf("message = %q, want unsupported or invalid YouTube URL", env.Message)
+			}
+			if queueCalled {
+				t.Fatal("upstream queue was called for unsupported URL")
+			}
+		})
+	}
+}
+
+func TestSongRequestHandlerAcceptsNormalizedYouTubeURL(t *testing.T) {
+	var seenVideoID string
+	ts, _, _ := newTestEnv(t, ytmdSongRequestHandler(t, testSearchResponse, emptyQueueResponse, func(r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		seenVideoID, _ = body["videoId"].(string)
+	}))
+
+	resp, err := http.Get(ts.URL + "/cmd/jb/songrequest?input=" + url.QueryEscape("<https://youtu.be/abc12345678>."))
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	env := decodeEnvelope(t, body)
+	if env.ExitCode != 0 {
+		t.Fatalf("exitCode = %d message = %q", env.ExitCode, env.Message)
+	}
+	if seenVideoID != "abc12345678" {
+		t.Fatalf("upstream videoId = %q, want abc12345678", seenVideoID)
+	}
+}
+
+func TestSongRequestHandlerRejectsOversizedInput(t *testing.T) {
+	called := false
+	ts, _, _ := newTestEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+
+	input := strings.Repeat("a", 2049)
+	resp, err := http.Get(ts.URL + "/cmd/jb/songrequest?input=" + url.QueryEscape(input))
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	env := decodeEnvelope(t, body)
+	if env.ExitCode != 1 {
+		t.Fatalf("exitCode = %d, want 1", env.ExitCode)
+	}
+	if !strings.Contains(env.Message, "input too long") {
+		t.Fatalf("message = %q, want input too long", env.Message)
+	}
+	if called {
+		t.Fatal("upstream YTMD was called for oversized input")
+	}
+}
+
 func TestSongRequestHandlerMissingInput(t *testing.T) {
 	called := false
 	ts, _, _ := newTestEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -387,8 +472,8 @@ func TestSongRequestHandlerSearchNoResults(t *testing.T) {
 	if env.ExitCode != 1 {
 		t.Fatalf("exitCode = %d, want 1", env.ExitCode)
 	}
-	if !strings.Contains(env.Message, "no search results") {
-		t.Fatalf("message = %q, want no search results", env.Message)
+	if !strings.Contains(env.Message, "no matching search results") {
+		t.Fatalf("message = %q, want no matching search results", env.Message)
 	}
 	if queueCalled {
 		t.Fatal("upstream queue was called when search returned no results")
