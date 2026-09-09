@@ -341,7 +341,6 @@ button {
   color: var(--muted);
   cursor: grab;
   user-select: none;
-  touch-action: none;
   opacity: 0.45;
   font-size: 0.85rem;
   line-height: 1;

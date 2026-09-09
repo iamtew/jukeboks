@@ -65,6 +65,22 @@ Behavior notes:
 http://localhost:42420/cmd/jb/queueinfo
 ```
 
+### `GET /api/queue`
+
+Normalized queue rows for the admin UI (works while paused).
+
+| | |
+|---|---|
+| **Method** | `GET` only |
+| **Upstream** | Retries `GET /api/v1/song` + `GET /api/v1/queue` |
+| **Success** | `exitCode: 0`, `data.status: "ok"` or `"empty"` |
+| **Data** | `{ "status", "items": [{ "title", "artist", "videoId", "queueIndex", "kind" }] }` — `kind` is `previous` / `current` / `next` |
+| **Error** | `exitCode: 1`, `data.status: "error"` or `"unavailable"` |
+
+```text
+http://localhost:42420/api/queue
+```
+
 ### `GET /cmd/jb/songrequest`
 
 Add a song to the **end** of the YTMD queue. Accepts a bare YouTube video ID, any supported YouTube / YouTube Music URL, or a free-text song query via a single query parameter.
@@ -171,6 +187,7 @@ Optional query on Admin/Overlay: `?ytmdPort=26538` if YTMD listens elsewhere.
 | `/cmd/ytmd`, `/cmd/ytmd/*` | * | Policy-gated proxy → YTMD `/api/v1/*` (see catalogs below) |
 | `GET /api/config` | GET | Load `jukeboks.json` → `{ exitCode, data: { blacklist, maxDuration } }` |
 | `POST` / `PUT /api/config` | POST, PUT | Save config body; returns saved payload |
+| `GET /api/queue` | GET | Normalized admin queue rows (`items` + `kind`) |
 | `/`, `/admin`, `/overlay`, … | GET | Static files from `webroot/` |
 
 ### Config shape (`jukeboks.json`)
@@ -355,6 +372,7 @@ Upstream YTMD OpenAPI (when running): `http://localhost:26538/doc`
 | `ws://localhost:26538/api/v1/ws` | YTMD WebSocket — Admin/Overlay connect **directly**; jukeboks does not proxy WS |
 | `GET /cmd/jb/songinfo` | Custom jukeboks summary (see top) — not a YTMD passthrough |
 | `GET /cmd/jb/queueinfo` | Custom jukeboks summary (see top) — not a YTMD passthrough |
+| `GET /api/queue` | Normalized admin queue (works while paused) |
 | `GET /cmd/jb/songrequest?input=…` | Add song to queue end (bare ID, YouTube URL, or text search query) |
 | `GET /health` | jukeboks liveness |
 | `GET /api/config` | jukeboks config |
@@ -379,6 +397,7 @@ Custom (chat-friendly) GETs:
 ```text
 http://localhost:42420/cmd/jb/songinfo
 http://localhost:42420/cmd/jb/queueinfo
+http://localhost:42420/api/queue
 http://localhost:42420/cmd/jb/songrequest?input=dQw4w9WgXcQ
 http://localhost:42420/health
 http://localhost:42420/api/config

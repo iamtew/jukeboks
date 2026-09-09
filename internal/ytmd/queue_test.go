@@ -17,6 +17,49 @@ func rendererEntry(title, artist, length, videoID string) map[string]any {
 	return map[string]any{"playlistPanelVideoRenderer": renderer}
 }
 
+func TestNormalizeAdminQueueKinds(t *testing.T) {
+	queuePayload := map[string]any{
+		"items": []any{
+			rendererEntry("Prev", "A", "3:00", "prev11111111"),
+			rendererEntry("Now", "B", "3:00", "now222222222"),
+			rendererEntry("Next", "C", "3:00", "next33333333"),
+		},
+	}
+	items := queuePayload["items"].([]any)
+	items[1].(map[string]any)["playlistPanelVideoRenderer"].(map[string]any)["selected"] = true
+
+	got, status := NormalizeAdminQueue(map[string]any{}, queuePayload)
+	if status != "ok" {
+		t.Fatalf("status = %q, want ok", status)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	wantKinds := []string{"previous", "current", "next"}
+	for i, want := range wantKinds {
+		if got[i].Kind != want || got[i].QueueIndex != i {
+			t.Fatalf("item[%d] = %+v, want kind=%s index=%d", i, got[i], want, i)
+		}
+	}
+	if got[1].Title != "Now" || got[1].VideoID != "now222222222" {
+		t.Fatalf("current item = %+v", got[1])
+	}
+}
+
+func TestNormalizeAdminQueueEmpty(t *testing.T) {
+	_, status := NormalizeAdminQueue(nil, map[string]any{"items": []any{}})
+	if status != "empty" {
+		t.Fatalf("status = %q, want empty", status)
+	}
+}
+
+func TestNormalizeAdminQueueError(t *testing.T) {
+	_, status := NormalizeAdminQueue(nil, map[string]any{"nope": true})
+	if status != "error" {
+		t.Fatalf("status = %q, want error", status)
+	}
+}
+
 func TestBuildQueueInfoResponseWhenPlaying(t *testing.T) {
 	songPayload := map[string]any{
 		"song":         map[string]any{"title": "Song A", "artist": "Artist A"},

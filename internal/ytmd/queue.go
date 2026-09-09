@@ -130,6 +130,60 @@ func CurrentSongVideoID(songPayload any) string {
 	return videoID
 }
 
+// AdminQueueItem is a flat queue row for the admin UI.
+type AdminQueueItem struct {
+	Title      string `json:"title"`
+	Artist     string `json:"artist"`
+	VideoID    string `json:"videoId,omitempty"`
+	QueueIndex int    `json:"queueIndex"`
+	Kind       string `json:"kind"` // previous | current | next
+}
+
+// NormalizeAdminQueue flattens a YTMD queue payload for the admin UI.
+// status is "ok", "empty", or "error".
+func NormalizeAdminQueue(songPayload, queuePayload any) (items []AdminQueueItem, status string) {
+	ordered := orderedQueueItemsArray(queuePayload)
+	if ordered == nil {
+		return nil, "error"
+	}
+	if len(ordered) == 0 {
+		return []AdminQueueItem{}, "empty"
+	}
+
+	current := ResolveCurrentQueueIndex(queuePayload, CurrentSongVideoID(songPayload))
+	items = make([]AdminQueueItem, 0, len(ordered))
+	for index, raw := range ordered {
+		itemMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		entry := summarizeQueueEntry(itemMap)
+		if entry.Title == "" && entry.Artist == "" && entry.VideoID == "" {
+			continue
+		}
+		kind := "next"
+		if current >= 0 {
+			switch {
+			case index == current:
+				kind = "current"
+			case index < current:
+				kind = "previous"
+			}
+		}
+		items = append(items, AdminQueueItem{
+			Title:      entry.Title,
+			Artist:     entry.Artist,
+			VideoID:    entry.VideoID,
+			QueueIndex: index,
+			Kind:       kind,
+		})
+	}
+	if len(items) == 0 {
+		return items, "empty"
+	}
+	return items, "ok"
+}
+
 func collectQueueEntriesForCommand(payload any) []queueEntrySummary {
 	if payload == nil {
 		return nil

@@ -64,7 +64,6 @@ func main() {
 
 	go func() {
 		<-ctx.Done()
-		httplog.ShutdownTerminal()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
@@ -72,20 +71,7 @@ func main() {
 		}
 	}()
 
-	listenURL := fmt.Sprintf("http://localhost:%s", actualPort)
-	httplog.SetupTerminal(listenURL, func(pollCtx context.Context) (httplog.SongStatus, error) {
-		payload, err := client.FetchJSONWithRetry(pollCtx, "/api/v1/song", 1, 0)
-		if err != nil {
-			return httplog.SongStatus{}, err
-		}
-		song := ytmd.ParseCurrentSong(payload)
-		return httplog.SongStatus{
-			Title:  song.Title,
-			Artist: song.Artist,
-			State:  song.State,
-		}, nil
-	})
-
+	fmt.Fprintf(httplog.Out, "listening on http://localhost:%s\n", actualPort)
 	fmt.Fprintf(httplog.Out, "webroot: %s\n", webroot)
 	fmt.Fprintf(httplog.Out, "config:  %s\n", store.Path())
 	if err := httpServer.Serve(listener); err != nil && !isNormalShutdownError(err) {

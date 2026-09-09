@@ -6,11 +6,9 @@ Scope: complexity only. Not correctness/security/performance.
 
 ## Ranked findings
 
-`yagni:` Client-side YTMD queue archaeology (~normalize/canonical/variant/signature walks). Serve normalized queue from Go (`/cmd/jb/queueinfo` already parses) or keep only `items[].playlistPanelVideoRenderer` + classify. [`webroot/admin/app.js`]
+`yagni:` ~~Client-side YTMD queue archaeology~~ **done:** `GET /api/queue` + admin renders flat items. [`webroot/admin/app.js`, `internal/ytmd/queue.go`, `internal/server/server.go`]
 
-`delete:` Dead queue helpers never called: `collectQueueEntries`, `collectQueueEntrySignatures`, `createSongIdentity`, `buildQueueIdentityKey`. Nothing. [`webroot/admin/app.js`]
-
-`native:` Hand-rolled pointer-capture drag (`handleQueuePointer*`, `elementFromPoint`). HTML5 `dragstart`/`drop`, or drop reorder. [`webroot/admin/app.js`, `webroot/admin/style.css`]
+`native:` ~~Hand-rolled pointer-capture drag~~ **done:** HTML5 `dragstart`/`drop`. [`webroot/admin/app.js`, `webroot/admin/style.css`]
 
 `delete:` `SeedRequestInsertIndex` (+ tests) — prod uses `seed.State.RequestInsertIndex` only. Nothing. [`internal/ytmd/playlist.go`, `internal/ytmd/queue_test.go`]
 

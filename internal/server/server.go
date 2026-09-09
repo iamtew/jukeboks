@@ -62,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	mux.HandleFunc("/api/config", s.configHandler)
+	mux.HandleFunc("GET /api/queue", s.adminQueueHandler)
 	s.registerSeedRoutes(mux)
 
 	mux.HandleFunc("/api/", s.apiNotFoundHandler)
@@ -99,6 +100,32 @@ func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) adminQueueHandler(w http.ResponseWriter, r *http.Request) {
+	songPayload, err := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/song", 3, 250*time.Millisecond)
+	if err != nil {
+		writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach song endpoint: %v", err), Data: map[string]any{"status": "unavailable"}})
+		return
+	}
+	queuePayload, err := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/queue", 3, 250*time.Millisecond)
+	if err != nil {
+		writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to reach queue endpoint: %v", err), Data: map[string]any{"status": "unavailable"}})
+		return
+	}
+
+	items, status := ytmd.NormalizeAdminQueue(songPayload, queuePayload)
+	exitCode := 0
+	if status == "error" {
+		exitCode = 1
+	}
+	writeJSON(w, Envelope{
+		ExitCode: exitCode,
+		Data: map[string]any{
+			"items":  items,
+			"status": status,
+		},
+	})
 }
 
 func (s *Server) songInfoHandler(w http.ResponseWriter, r *http.Request) {

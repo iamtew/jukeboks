@@ -470,7 +470,6 @@ let queueActionFeedbackTimer = null;
 let queueDragActive = false;
 let queueDragFromIndex = null;
 let queueMoveInFlight = false;
-let queuePointerDrag = null;
 let queueRefreshDebounceTimer = null;
 let pollTimer = null;
 
@@ -631,11 +630,6 @@ async function handleQueueItemAction(event) {
     button.textContent = '✓';
     setQueueActionFeedback(action === 'delete' ? 'Deleted queue item' : 'Started queue item', 'success');
 
-    if (action !== 'delete') {
-      playbackState.queue = classifyQueueEntries(playbackState.queue, queueIndex, playbackState.queue);
-      renderQueue();
-    }
-
     window.setTimeout(() => {
       refreshQueueFromProxy();
       refreshNowPlayingFromProxy();
@@ -727,37 +721,12 @@ function clearQueueDropTargets() {
 function clearQueueDragState() {
   queueDragActive = false;
   queueDragFromIndex = null;
-  queuePointerDrag = null;
   document.body.classList.remove('is-queue-dragging');
   if (!queueList) return;
   queueList.querySelectorAll('.queue-item.is-dragging').forEach((el) => {
     el.classList.remove('is-dragging');
   });
   clearQueueDropTargets();
-}
-
-function getDraggableQueueItem(target) {
-  const item = target?.closest?.('.queue-item[data-queue-draggable="true"]');
-  if (!item || !queueList?.contains(item)) return null;
-  return item;
-}
-
-function resolveDropTargetAtPoint(clientX, clientY) {
-  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
-
-  const draggingItem = queuePointerDrag?.item;
-  if (draggingItem) {
-    draggingItem.style.pointerEvents = 'none';
-  }
-
-  const element = document.elementFromPoint(clientX, clientY);
-  const target = getDraggableQueueItem(element);
-
-  if (draggingItem) {
-    draggingItem.style.pointerEvents = '';
-  }
-
-  return target;
 }
 
 function setQueueDropTarget(item) {
@@ -769,74 +738,53 @@ function setQueueDropTarget(item) {
   }
 }
 
-function cleanupQueuePointerDragListeners(handle) {
-  if (!handle) return;
-  handle.removeEventListener('pointermove', handleQueuePointerMove);
-  handle.removeEventListener('pointerup', handleQueuePointerUp);
-  handle.removeEventListener('pointercancel', handleQueuePointerCancel);
-}
+function bindQueueDragDrop() {
+  if (!queueList || queueList.dataset.dndBound === '1') return;
+  queueList.dataset.dndBound = '1';
 
-function handleQueuePointerDown(event) {
-  if (event.button !== 0) return;
+  queueList.addEventListener('dragstart', (event) => {
+    const handle = event.target.closest('.queue-drag-handle');
+    const item = event.target.closest('.queue-item[data-queue-draggable="true"]');
+    if (!handle || !item || !queueList.contains(item)) {
+      event.preventDefault();
+      return;
+    }
+    const fromIndex = Number(item.dataset.queueIndex);
+    if (!Number.isFinite(fromIndex)) {
+      event.preventDefault();
+      return;
+    }
+    queueDragActive = true;
+    queueDragFromIndex = fromIndex;
+    item.classList.add('is-dragging');
+    document.body.classList.add('is-queue-dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(fromIndex));
+  });
 
-  const handle = event.target.closest('.queue-drag-handle');
-  if (!handle) return;
+  queueList.addEventListener('dragover', (event) => {
+    const target = event.target.closest('.queue-item[data-queue-draggable="true"]');
+    if (!target || !queueList.contains(target)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setQueueDropTarget(target);
+  });
 
-  const item = getDraggableQueueItem(handle);
-  if (!item) return;
+  queueList.addEventListener('drop', async (event) => {
+    const target = event.target.closest('.queue-item[data-queue-draggable="true"]');
+    if (!target || !queueList.contains(target)) return;
+    event.preventDefault();
+    const fromIndex = queueDragFromIndex;
+    const toIndex = Number(target.dataset.queueIndex);
+    clearQueueDragState();
+    if (Number.isFinite(fromIndex) && Number.isFinite(toIndex) && fromIndex !== toIndex) {
+      await moveQueueItem(fromIndex, toIndex);
+    }
+  });
 
-  const fromIndex = Number(item.dataset.queueIndex);
-  if (!Number.isFinite(fromIndex)) return;
-
-  event.preventDefault();
-
-  queueDragActive = true;
-  queueDragFromIndex = fromIndex;
-  queuePointerDrag = { pointerId: event.pointerId, fromIndex, item, handle };
-  item.classList.add('is-dragging');
-  document.body.classList.add('is-queue-dragging');
-
-  handle.setPointerCapture(event.pointerId);
-  handle.addEventListener('pointermove', handleQueuePointerMove);
-  handle.addEventListener('pointerup', handleQueuePointerUp);
-  handle.addEventListener('pointercancel', handleQueuePointerCancel);
-}
-
-function handleQueuePointerMove(event) {
-  if (!queuePointerDrag || event.pointerId !== queuePointerDrag.pointerId) return;
-  setQueueDropTarget(resolveDropTargetAtPoint(event.clientX, event.clientY));
-}
-
-async function finishQueuePointerDrag(event) {
-  if (!queuePointerDrag || event.pointerId !== queuePointerDrag.pointerId) return;
-
-  const fromIndex = queuePointerDrag.fromIndex;
-  const handle = queuePointerDrag.handle;
-  const target = resolveDropTargetAtPoint(event.clientX, event.clientY);
-  const toIndex = target ? Number(target.dataset.queueIndex) : NaN;
-
-  cleanupQueuePointerDragListeners(handle);
-  try {
-    handle.releasePointerCapture(event.pointerId);
-  } catch (_) {
-    // Ignore if capture was already released.
-  }
-
-  clearQueueDragState();
-
-  if (Number.isFinite(fromIndex) && Number.isFinite(toIndex) && fromIndex !== toIndex) {
-    await moveQueueItem(fromIndex, toIndex);
-  }
-}
-
-function handleQueuePointerUp(event) {
-  finishQueuePointerDrag(event);
-}
-
-function handleQueuePointerCancel(event) {
-  if (!queuePointerDrag || event.pointerId !== queuePointerDrag.pointerId) return;
-  cleanupQueuePointerDragListeners(queuePointerDrag.handle);
-  clearQueueDragState();
+  queueList.addEventListener('dragend', () => {
+    clearQueueDragState();
+  });
 }
 
 if (queueList) {
@@ -847,7 +795,7 @@ if (queueList) {
     }
     handleQueueToggle(event);
   });
-  queueList.addEventListener('pointerdown', handleQueuePointerDown);
+  bindQueueDragDrop();
 }
 
 if (clearQueueButton) {
@@ -933,552 +881,6 @@ function updateProgressBar() {
   totalTime.textContent = formatTime(playbackState.duration);
 }
 
-function extractTextFromRuns(value) {
-  if (!value) return '';
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    return value.map((entry) => extractTextFromRuns(entry)).filter(Boolean).join('');
-  }
-  if (typeof value === 'object') {
-    if (Array.isArray(value.runs)) {
-      return value.runs.map((entry) => extractTextFromRuns(entry)).filter(Boolean).join('');
-    }
-    if (typeof value.text === 'string') {
-      return value.text;
-    }
-    if (typeof value.simpleText === 'string') {
-      return value.simpleText;
-    }
-    if (typeof value.label === 'string') {
-      return value.label;
-    }
-    if (typeof value.displayText === 'string') {
-      return value.displayText;
-    }
-    if (typeof value.name === 'string') {
-      return value.name;
-    }
-    if (typeof value.title === 'string') {
-      return value.title;
-    }
-  }
-  return '';
-}
-
-function normalizeBylineArtist(value) {
-  const text = String(value || '').trim();
-  if (!text) {
-    return '';
-  }
-
-  const separators = [' • ', '•', ' - ', ' – ', ' / ', ' | ', ' — '];
-  for (const separator of separators) {
-    if (text.includes(separator)) {
-      const parts = text.split(separator).map((part) => part.trim()).filter(Boolean);
-      if (parts.length > 0) {
-        return parts[0];
-      }
-    }
-  }
-
-  return text;
-}
-
-function escapeRegExp(value) {
-  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function canonicalizeQueueTitle(title, artist = '') {
-  let normalized = String(title || '').trim();
-  if (!normalized) {
-    return '';
-  }
-
-  normalized = normalized
-    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015]/g, '-')
-    .replace(/\s+/g, ' ')
-    .replace(/[-–—:|/•]+/g, ' ')
-    .replace(/\s+/g, ' ');
-
-  const artistText = String(artist || '').trim();
-  if (artistText) {
-    const artistPrefix = new RegExp(`^${escapeRegExp(artistText)}(?:\\s*)`, 'i');
-    normalized = normalized.replace(artistPrefix, '');
-  }
-
-  normalized = normalized
-    .replace(/\s*\((?:official|hd|music|lyric|digital)?\s*(?:video|music video|audio|lyric video|video clip)\s*\)$/i, '')
-    .replace(/\s*\[(?:official|hd|music|lyric|digital)?\s*(?:video|music video|audio|lyric video|video clip)\s*\]$/i, '')
-    .replace(/\s*[-–—:|/•]\s*(?:official|hd|music|lyric|digital)?\s*(?:video|music video|audio|lyric video|video clip)\s*$/i, '')
-    .replace(/\b(?:official|hd|music|lyric|digital)\s+(?:video|music video|audio|lyric video|video clip)\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .replace(/\s+([,.;:!?])/g, '$1');
-
-  return normalized.trim();
-}
-
-function pickPreferredText(values) {
-  for (const value of values) {
-    const text = extractTextFromRuns(value);
-    if (text && text.trim()) {
-      return text.trim();
-    }
-  }
-  return '';
-}
-
-function isMeaningfulQueueText(value) {
-  const text = String(value || '').trim().toLowerCase();
-  return Boolean(text) && !['untitled', 'unknown', 'unknown title', 'unknown artist', 'n/a', 'na'].includes(text);
-}
-
-function hasMeaningfulQueueMetadata(entry) {
-  const normalized = normalizeQueueItem(entry);
-  if (!normalized) return false;
-  const title = String(normalized.title || '').trim();
-  const artist = String(normalized.artist || '').trim();
-  return isMeaningfulQueueText(title) || isMeaningfulQueueText(artist);
-}
-
-function extractQueueIndexFromContext(value, fallback = 0) {
-  if (!value || typeof value !== 'object') {
-    return fallback;
-  }
-
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const resolved = extractQueueIndexFromContext(entry, fallback);
-      if (resolved !== fallback) {
-        return resolved;
-      }
-    }
-    return fallback;
-  }
-
-  const candidates = [
-    value.currentIndex,
-    value.index,
-    value.current,
-    value.selectedIndex,
-    value.position,
-  ];
-
-  for (const candidate of candidates) {
-    const num = Number(candidate);
-    if (Number.isFinite(num) && num >= 0) {
-      return num;
-    }
-  }
-
-  for (const [key, entry] of Object.entries(value)) {
-    if (key === 'currentIndex' || key === 'index' || key === 'current' || key === 'selectedIndex' || key === 'position') {
-      continue;
-    }
-    const resolved = extractQueueIndexFromContext(entry, fallback);
-    if (resolved !== fallback) {
-      return resolved;
-    }
-  }
-
-  return fallback;
-}
-
-function findQueueRendererCandidate(value, seen = new WeakSet()) {
-  if (!value || typeof value !== 'object') return null;
-  if (seen.has(value)) return null;
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      const resolved = findQueueRendererCandidate(entry, seen);
-      if (resolved) {
-        return resolved;
-      }
-    }
-    return null;
-  }
-
-  const directKeys = ['playlistPanelVideoRenderer', 'videoRenderer', 'musicResponsiveListItemRenderer', 'playlistPanelRenderer'];
-  for (const key of directKeys) {
-    const candidate = value[key];
-    if (candidate && typeof candidate === 'object') {
-      return candidate;
-    }
-  }
-
-  for (const key of ['primaryRenderer', 'renderer', 'playlistPanelVideoWrapperRenderer', 'counterpartRenderer']) {
-    const candidate = value[key];
-    const resolved = findQueueRendererCandidate(candidate, seen);
-    if (resolved) {
-      return resolved;
-    }
-  }
-
-  for (const candidate of Object.values(value)) {
-    if (!candidate || typeof candidate !== 'object') {
-      continue;
-    }
-    const resolved = findQueueRendererCandidate(candidate, seen);
-    if (resolved) {
-      return resolved;
-    }
-  }
-
-  return null;
-}
-
-function isQueueEntryLike(value) {
-  if (!value || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return false;
-
-  const directQueueKeys = ['playlistPanelVideoWrapperRenderer', 'playlistPanelVideoRenderer', 'videoRenderer', 'musicResponsiveListItemRenderer', 'playlistPanelRenderer'];
-  const hasDirectQueueShape = directQueueKeys.some((key) => Boolean(value[key]));
-  const renderer = findQueueRendererCandidate(value);
-  const normalized = normalizeQueueItem(value);
-  const hasMeaningfulText = hasMeaningfulQueueMetadata(value);
-  const hasDirectMetadata = Boolean(
-    value.title
-    || value.titleText
-    || value.alternativeTitle
-    || value.altTitle
-    || value.secondaryTitle
-    || value.songTitle
-    || value.longBylineText
-    || value.shortBylineText
-    || value.videoId
-    || value.id
-    || value.selected
-    || value.isSelected
-    || value.isCurrent
-    || value.current
-    || value.navigationEndpoint?.watchEndpoint?.videoId
-    || value.watchEndpoint?.videoId
-  );
-
-  return Boolean(
-    hasMeaningfulText
-    || (hasDirectQueueShape && Boolean(renderer) && hasDirectMetadata)
-  );
-}
-
-function getOrderedQueueItemsArray(queueData) {
-  if (!queueData || typeof queueData !== 'object') {
-    return null;
-  }
-
-  if (Array.isArray(queueData)) {
-    return queueData;
-  }
-
-  if (queueData.data && typeof queueData.data === 'object' && !Array.isArray(queueData.data)) {
-    const nested = getOrderedQueueItemsArray(queueData.data);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  for (const key of ['items', 'entries', 'contents', 'queue', 'content']) {
-    if (Array.isArray(queueData[key])) {
-      return queueData[key];
-    }
-  }
-
-  return null;
-}
-
-function collectOrderedQueueEntries(queueData) {
-  const ordered = getOrderedQueueItemsArray(queueData);
-  if (ordered) {
-    const collected = [];
-    ordered.forEach((entry, index) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-        return;
-      }
-      const hasRenderer = Boolean(findQueueRendererCandidate(entry));
-      if (!isQueueEntryLike(entry) && !hasRenderer) {
-        return;
-      }
-      if (!hasMeaningfulQueueMetadata(entry) && !hasRenderer) {
-        return;
-      }
-      collected.push({ item: entry, queueIndex: index });
-    });
-    return collected;
-  }
-
-  return collectQueueEntriesFallback(queueData);
-}
-
-function collectQueueEntriesFallback(value, collected = [], seen = new WeakSet(), queueIndex = null, treatArraysAsQueue = false) {
-  if (Array.isArray(value)) {
-    if (!treatArraysAsQueue) {
-      return collected;
-    }
-    value.forEach((entry, index) => collectQueueEntriesFallback(entry, collected, seen, index, false));
-    return collected;
-  }
-
-  if (!value || typeof value !== 'object') {
-    return collected;
-  }
-
-  if (seen.has(value)) {
-    return collected;
-  }
-  seen.add(value);
-
-  if (isQueueEntryLike(value)) {
-    const normalizedEntry = normalizeQueueItem(value);
-    if (normalizedEntry && hasMeaningfulQueueMetadata(value)) {
-      collected.push({ item: value, queueIndex: Number.isFinite(queueIndex) ? queueIndex : collected.length });
-      return collected;
-    }
-  }
-
-  Object.values(value).forEach((entry) => {
-    if (!entry || typeof entry !== 'object') {
-      return;
-    }
-    collectQueueEntriesFallback(entry, collected, seen, queueIndex, Array.isArray(entry));
-  });
-
-  return collected;
-}
-
-function normalizeQueueItem(item) {
-  if (!item) return null;
-  if (typeof item === 'string') {
-    return { title: item, artist: '', selected: false, videoId: '' };
-  }
-
-  const renderer = findQueueRendererCandidate(item) || item.playlistPanelVideoRenderer || item.videoRenderer || item.musicResponsiveListItemRenderer || item.playlistPanelRenderer || item;
-  const titleCandidates = [
-    renderer?.title,
-    renderer?.titleText,
-    renderer?.displayTitle,
-    renderer?.shortTitle,
-    renderer?.songTitle,
-    renderer?.track,
-    renderer?.name,
-    item?.title,
-    item?.titleText,
-    item?.displayTitle,
-    item?.shortTitle,
-    item?.songTitle,
-    item?.track,
-    item?.name,
-    renderer?.alternativeTitle,
-    renderer?.altTitle,
-    renderer?.secondaryTitle,
-    item?.alternativeTitle,
-    item?.altTitle,
-    item?.secondaryTitle,
-  ];
-  const artistCandidates = [
-    renderer?.longBylineText,
-    renderer?.shortBylineText,
-    renderer?.bylineText,
-    renderer?.authorText,
-    renderer?.ownerText,
-    renderer?.artist,
-    renderer?.artistName,
-    item?.artist,
-    item?.artistName,
-    item?.author,
-    item?.channel,
-  ];
-  const rawArtistText = pickPreferredText(artistCandidates);
-  const artist = normalizeBylineArtist(rawArtistText);
-  const title = canonicalizeQueueTitle(pickPreferredText(titleCandidates), artist);
-  const duration = extractTextFromRuns(renderer?.lengthText || renderer?.lengthText?.runs || renderer?.durationText || renderer?.durationText?.runs || item?.duration || item?.durationText || item?.length || item?.lengthText);
-  const selected = Boolean(
-    renderer?.selected
-    || renderer?.isSelected
-    || renderer?.isCurrent
-    || renderer?.current
-    || item?.selected
-    || item?.isSelected
-    || item?.isCurrent
-    || item?.current
-  );
-  const videoId = renderer?.videoId
-    || renderer?.id
-    || renderer?.navigationEndpoint?.watchEndpoint?.videoId
-    || item?.videoId
-    || item?.id
-    || item?.navigationEndpoint?.watchEndpoint?.videoId
-    || item?.watchEndpoint?.videoId
-    || '';
-
-  return {
-    title: title.trim(),
-    artist: artist.trim(),
-    duration: duration.trim(),
-    selected,
-    videoId,
-    rawItem: item,
-  };
-}
-
-function normalizeText(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function extractQueueIdentity(item) {
-  if (!item) return { title: '', artist: '', videoId: '' };
-  const renderer = findQueueRendererCandidate(item) || item.playlistPanelVideoRenderer || item.videoRenderer || item.musicResponsiveListItemRenderer || item.playlistPanelRenderer || item;
-  const artistCandidates = [
-    renderer?.longBylineText,
-    renderer?.shortBylineText,
-    renderer?.bylineText,
-    renderer?.authorText,
-    renderer?.ownerText,
-    renderer?.artist,
-    renderer?.artistName,
-    item?.artist,
-    item?.artistName,
-    item?.author,
-    item?.channel,
-  ];
-  const rawArtistText = pickPreferredText(artistCandidates);
-  const artist = normalizeText(normalizeBylineArtist(rawArtistText));
-  const title = normalizeText(canonicalizeQueueTitle(pickPreferredText([
-    renderer?.title,
-    renderer?.titleText,
-    renderer?.displayTitle,
-    renderer?.shortTitle,
-    renderer?.songTitle,
-    renderer?.track,
-    renderer?.name,
-    item?.title,
-    item?.titleText,
-    item?.displayTitle,
-    item?.shortTitle,
-    item?.songTitle,
-    item?.track,
-    item?.name,
-    renderer?.alternativeTitle,
-    renderer?.altTitle,
-    renderer?.secondaryTitle,
-    item?.alternativeTitle,
-    item?.altTitle,
-    item?.secondaryTitle,
-  ]), pickPreferredText(artistCandidates)));
-  const videoId = normalizeText(renderer?.videoId || renderer?.id || renderer?.navigationEndpoint?.watchEndpoint?.videoId || item?.videoId || item?.id || '');
-  return { title, artist, videoId };
-}
-
-function matchesCurrentSong(normalized, currentTitle, currentArtist, currentVideoId) {
-  if (!normalized) return false;
-  const entry = extractQueueIdentity(normalized.rawItem || normalized.item || normalized);
-  const title = normalizeText(currentTitle);
-  const artist = normalizeText(currentArtist);
-  const videoId = normalizeText(currentVideoId);
-  const selected = Boolean(
-    normalized.selected
-    || normalized.rawItem?.selected
-    || normalized.rawItem?.isCurrent
-    || normalized.rawItem?.current
-    || normalized.item?.selected
-    || normalized.item?.isCurrent
-    || normalized.item?.current
-  );
-
-  if (selected) return true;
-
-  if (videoId && entry.videoId && entry.videoId === videoId) {
-    return true;
-  }
-
-  if (title && artist && entry.title && entry.artist) {
-    return entry.title === title && entry.artist === artist;
-  }
-
-  if (title && !artist && entry.title) {
-    return entry.title === title;
-  }
-
-  return false;
-}
-
-function classifyQueueEntries(entries, currentIndex = 0, context = null) {
-  const currentTitle = playbackState.title || '';
-  const currentArtist = playbackState.artist || '';
-  const currentVideoId = playbackState.videoId || '';
-  const fallbackIndex = Number.isFinite(currentIndex) && currentIndex >= 0 ? currentIndex : 0;
-  const normalizedIndex = extractQueueIndexFromContext(context || entries, fallbackIndex);
-
-  const normalizedEntries = entries
-    .map((entry, index) => {
-      const normalized = normalizeQueueItem(entry?.item || entry);
-      if (!normalized || (!normalized.title && !normalized.artist && !normalized.videoId)) return null;
-      const sourceQueueIndex = Number.isFinite(entry?.queueIndex)
-        ? entry.queueIndex
-        : (Number.isFinite(entry?.sourceIndex) ? entry.sourceIndex : index);
-      return {
-        ...normalized,
-        queueIndex: sourceQueueIndex,
-        sourceIndex: sourceQueueIndex,
-      };
-    })
-    .filter(Boolean);
-
-  if (normalizedEntries.length === 0) {
-    return [];
-  }
-
-  let resolvedCurrentIndex = -1;
-
-  const selectedIndex = normalizedEntries.findIndex((entry) => entry.selected);
-  if (selectedIndex >= 0) {
-    resolvedCurrentIndex = selectedIndex;
-  }
-
-  if (resolvedCurrentIndex < 0 && currentVideoId) {
-    for (let index = normalizedEntries.length - 1; index >= 0; index -= 1) {
-      const entry = normalizedEntries[index];
-      if (entry.videoId && entry.videoId.toLowerCase() === currentVideoId.toLowerCase()) {
-        resolvedCurrentIndex = index;
-        break;
-      }
-    }
-  }
-
-  if (resolvedCurrentIndex < 0) {
-    const matchIndex = normalizedEntries.findIndex((entry) => (
-      matchesCurrentSong(entry, currentTitle, currentArtist, currentVideoId)
-    ));
-    if (matchIndex >= 0) {
-      resolvedCurrentIndex = matchIndex;
-    }
-  }
-
-  if (resolvedCurrentIndex < 0 && Number.isFinite(currentIndex)) {
-    const bySourceIndex = normalizedEntries.findIndex((entry) => (
-      entry.sourceIndex === currentIndex || entry.queueIndex === currentIndex
-    ));
-    if (bySourceIndex >= 0) {
-      resolvedCurrentIndex = bySourceIndex;
-    }
-  }
-
-  if (resolvedCurrentIndex < 0 && Number.isFinite(normalizedIndex) && normalizedIndex >= 0 && normalizedIndex < normalizedEntries.length) {
-    resolvedCurrentIndex = normalizedIndex;
-  }
-
-  return normalizedEntries.map((entry, index) => {
-    const queueIndex = Number.isFinite(entry?.sourceIndex) ? entry.sourceIndex : index;
-    if (resolvedCurrentIndex >= 0 && index === resolvedCurrentIndex) {
-      return { item: entry, kind: 'current', queueIndex };
-    }
-
-    if (resolvedCurrentIndex >= 0 && index < resolvedCurrentIndex) {
-      return { item: entry, kind: 'previous', queueIndex };
-    }
-
-    return { item: entry, kind: 'next', queueIndex };
-  });
-}
 
 function renderQueue() {
   if (!queueList) return;
@@ -1503,10 +905,7 @@ function renderQueue() {
     return;
   }
 
-  const visibleQueueItems = (playbackState.queue || []).filter((item) => {
-    const normalized = normalizeQueueItem(item?.item || item);
-    return hasMeaningfulQueueMetadata(item?.item || item) && Boolean(normalized?.title || normalized?.artist || normalized?.videoId);
-  });
+  const visibleQueueItems = playbackState.queue.filter((item) => item && (item.title || item.artist || item.videoId));
   const previousItems = visibleQueueItems.filter((item) => item.kind === 'previous');
   const currentItem = visibleQueueItems.find((item) => item.kind === 'current');
   const nextItems = visibleQueueItems.filter((item) => item.kind === 'next');
@@ -1516,9 +915,7 @@ function renderQueue() {
   }
 
   const buildItem = (item, kind) => {
-    const normalized = normalizeQueueItem(item?.item || item);
-    if (!normalized || (!normalized.title && !normalized.artist && !normalized.videoId)) return '';
-    const displayText = [normalized.artist, normalized.title].filter(Boolean).join(' - ');
+    const displayText = [item.artist, item.title].filter(Boolean).join(' - ');
     const classes = [`queue-item`, kind === 'current' ? 'is-current' : '', kind === 'previous' ? 'is-previous' : ''].filter(Boolean).join(' ');
     const queueIndex = Number.isFinite(item?.queueIndex) ? item.queueIndex : '';
     const actionsDisabled = !Number.isFinite(item?.queueIndex);
@@ -1527,7 +924,7 @@ function renderQueue() {
       ? ` data-queue-draggable="true" data-queue-index="${queueIndex}"`
       : '';
     const dragHandle = canDrag
-      ? '<span class="queue-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">☰</span>'
+      ? `<span class="queue-drag-handle" draggable="true" title="Drag to reorder" aria-label="Drag to reorder">☰</span>`
       : '';
     return `
       <div class="${classes}"${dragAttrs}>
@@ -1563,6 +960,42 @@ function renderQueue() {
     : '<div class="queue-item"><div class="queue-meta">No upcoming songs.</div></div>';
 
   queueList.innerHTML = `${feedbackMarkup}${previousMarkup}${currentMarkup}${nextMarkup}`;
+}
+
+async function refreshQueueFromProxy() {
+  if (queueDragActive || queueMoveInFlight) {
+    return;
+  }
+
+  const requestId = ++queueRefreshToken;
+  try {
+    const response = await fetch('/api/queue', { headers: { Accept: 'application/json' } });
+    const payload = await response.json();
+    if (requestId !== queueRefreshToken || queueDragActive || queueMoveInFlight) {
+      return;
+    }
+
+    const status = payload?.data?.status || 'unavailable';
+    const items = Array.isArray(payload?.data?.items) ? payload.data.items : [];
+
+    if (status === 'unavailable') {
+      playbackState.queue = [];
+      playbackState.queueStatus = 'unavailable';
+      renderQueue();
+      return;
+    }
+
+    playbackState.queue = items;
+    playbackState.queueStatus = status === 'ok' && items.length === 0 ? 'empty' : status;
+    renderQueue();
+  } catch (err) {
+    if (requestId !== queueRefreshToken || queueDragActive || queueMoveInFlight) {
+      return;
+    }
+    playbackState.queue = [];
+    playbackState.queueStatus = 'unavailable';
+    renderQueue();
+  }
 }
 
 function applyNowPlaying(payload) {
@@ -1605,60 +1038,6 @@ function applyNowPlaying(payload) {
   totalTime.textContent = formatTime(playbackState.duration);
   updatePlaybackButtons();
   updateProgressBar();
-  if (playbackState.queue?.length && !queueDragActive && !queueMoveInFlight) {
-    playbackState.queue = classifyQueueEntries(playbackState.queue, 0, playbackState.queue);
-    renderQueue();
-  }
-}
-
-async function refreshQueueFromProxy() {
-  if (queueDragActive || queueMoveInFlight) {
-    return;
-  }
-
-  const requestId = ++queueRefreshToken;
-  try {
-    const response = await fetch('/cmd/ytmd/queue/get', { headers: { Accept: 'application/json' } });
-    const payload = await readCommandEnvelope(response);
-    const queueData = payload?.data ?? payload;
-    const queueEntries = collectOrderedQueueEntries(queueData);
-    const currentIndex = Number(queueData?.currentIndex ?? queueData?.index ?? queueData?.current ?? NaN);
-
-    if (requestId !== queueRefreshToken || queueDragActive || queueMoveInFlight) {
-      return;
-    }
-
-    if (queueEntries.length > 0) {
-      playbackState.queue = classifyQueueEntries(
-        queueEntries,
-        Number.isFinite(currentIndex) ? currentIndex : 0,
-        queueData,
-      );
-      playbackState.queueStatus = 'ok';
-      renderQueue();
-      return;
-    }
-
-    const ordered = getOrderedQueueItemsArray(queueData);
-    if (ordered && ordered.length === 0) {
-      playbackState.queue = [];
-      playbackState.queueStatus = 'empty';
-      renderQueue();
-      return;
-    }
-
-    playbackState.queue = [];
-    playbackState.queueStatus = ordered ? 'empty' : 'error';
-    renderQueue();
-  } catch (err) {
-    if (requestId !== queueRefreshToken || queueDragActive || queueMoveInFlight) {
-      return;
-    }
-
-    playbackState.queue = [];
-    playbackState.queueStatus = 'unavailable';
-    renderQueue();
-  }
 }
 
 async function refreshNowPlayingFromProxy() {
