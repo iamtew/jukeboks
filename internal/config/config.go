@@ -72,7 +72,12 @@ func Save(path string, cfg Config) error {
 		return err
 	}
 	data = append(data, '\n')
-	return writeFileAtomic(path, data, 0o644)
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 func Normalize(cfg Config) Config {
@@ -137,50 +142,4 @@ func Normalize(cfg Config) Config {
 	cfg.SeedPlaylists = normalizedSeed
 
 	return cfg
-}
-
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-	}
-
-	tmp, err := os.CreateTemp(dir, ".jukeboks-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	cleanup := func() {
-		_ = os.Remove(tmpName)
-	}
-
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		cleanup()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Chmod(tmpName, perm); err != nil {
-		cleanup()
-		return err
-	}
-
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(path)
-		if err := os.Rename(tmpName, path); err != nil {
-			cleanup()
-			return err
-		}
-	}
-	return nil
 }

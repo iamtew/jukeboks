@@ -34,12 +34,6 @@ func LookupPlaylistByID(ctx context.Context, client *Client, playlistID string) 
 		attempts = append(attempts, err.Error())
 	}
 
-	if lookup, err := lookupPlaylistViaPlayPlaylist(ctx, client, playlistID); err == nil {
-		return lookup, nil
-	} else if err != nil {
-		attempts = append(attempts, err.Error())
-	}
-
 	detail := strings.Join(attempts, "; ")
 	if detail == "" {
 		detail = "playlist must be public or viewable in YTMD"
@@ -53,7 +47,7 @@ func parsePlaylistPayload(playlistID string, payload any) (PlaylistLookup, bool)
 		name = playlistID
 	}
 
-	entries := CollectQueueEntries(payload)
+	entries := collectQueueEntriesForCommand(payload)
 	tracks := make([]TrackLookup, 0, len(entries))
 	seen := map[string]struct{}{}
 	for _, entry := range entries {
@@ -159,10 +153,6 @@ func extractPlaylistName(payload any) string {
 	}
 	walk(payload)
 	return found
-}
-
-func CollectQueueEntries(payload any) []queueEntrySummary {
-	return collectQueueEntriesForCommand(payload)
 }
 
 func QueueItemVideoIDs(payload any) []string {
@@ -276,47 +266,6 @@ func QueueIndexForVideoID(payload any, videoID string, preferLast bool) int {
 		}
 	}
 	return -1
-}
-
-// SeedRequestInsertIndex returns the queue index where a request should land during
-// seed mode: after the currently playing track and after any already-queued requests.
-// requestVideoIDs are tracks previously added via songrequest while seed mode was active.
-func SeedRequestInsertIndex(payload any, requestVideoIDs map[string]struct{}, currentVideoID string) int {
-	currentIndex := ResolveCurrentQueueIndex(payload, currentVideoID)
-	if currentIndex < 0 {
-		return -1
-	}
-
-	items := orderedQueueItemsArray(payload)
-	if items == nil {
-		return currentIndex + 1
-	}
-
-	insertAfter := currentIndex
-	for index := currentIndex + 1; index < len(items); index++ {
-		itemMap, ok := items[index].(map[string]any)
-		if !ok {
-			break
-		}
-		videoID := strings.ToLower(strings.TrimSpace(queueItemVideoID(itemMap)))
-		if videoID == "" {
-			break
-		}
-		if _, isRequest := requestVideoIDs[videoID]; !isRequest {
-			break
-		}
-		insertAfter = index
-	}
-	return insertAfter + 1
-}
-
-// QueueItemCount returns the number of entries in the YTMD queue payload.
-func QueueItemCount(payload any) int {
-	items := orderedQueueItemsArray(payload)
-	if items == nil {
-		return 0
-	}
-	return len(items)
 }
 
 func queueItemVideoID(item map[string]any) string {

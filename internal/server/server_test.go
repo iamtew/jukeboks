@@ -817,4 +817,3 @@ func TestSeedStatusEndpoint(t *testing.T) {
 		t.Fatalf("exitCode = %d message = %q", env.ExitCode, env.Message)
 	}
 }
-

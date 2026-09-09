@@ -212,18 +212,6 @@ button {
   color: var(--text);
 }
 
-.control-btn--readonly,
-#autoplayButton {
-  opacity: 0.72;
-  cursor: default;
-}
-
-#autoplayButton.is-active {
-  outline: none;
-  background: var(--panel-alt);
-  color: var(--muted);
-}
-
 .tabs {
   display: flex;
   gap: 6px;
@@ -337,14 +325,6 @@ button {
 
 .queue-item.is-previous {
   opacity: 0.9;
-}
-
-.queue-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 700;
-  color: var(--text);
 }
 
 .queue-row {
@@ -543,57 +523,6 @@ body.is-queue-dragging .queue-drag-handle {
   flex-wrap: wrap;
   align-items: center;
   margin-bottom: 8px;
-}
-
-.command-table-wrap {
-  overflow-x: auto;
-  margin-bottom: 8px;
-}
-
-.command-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.73rem;
-}
-
-.command-table th,
-.command-table td {
-  text-align: left;
-  padding: 5px 6px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-
-.command-table th {
-  color: var(--muted);
-  font-weight: 600;
-}
-
-.command-table tbody tr:hover {
-  background: rgba(255,255,255,0.04);
-}
-
-.method-pill {
-  display: inline-block;
-  margin-right: 3px;
-  margin-bottom: 3px;
-  padding: 2px 5px;
-  background: rgba(121,214,255,0.16);
-  color: var(--accent);
-  font-size: 0.68rem;
-  font-weight: 700;
-}
-
-.command-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px 7px;
-  border: 1px solid var(--border);
-  background: var(--panel-alt);
-  color: var(--text);
-  text-decoration: none;
-  font-size: 0.72rem;
 }
 
 .url-box {

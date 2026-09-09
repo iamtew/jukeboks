@@ -27,8 +27,8 @@ func TestYTMDRouteMapping(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ytmdRouteForPath(tc.path); got != tc.expected {
-				t.Fatalf("ytmdRouteForPath(%q) = %q, want %q", tc.path, got, tc.expected)
+			if got := RouteForPath(tc.path); got != tc.expected {
+				t.Fatalf("RouteForPath(%q) = %q, want %q", tc.path, got, tc.expected)
 			}
 		})
 	}
@@ -59,7 +59,7 @@ func TestMethodSuffixResolution(t *testing.T) {
 
 func TestBuildUpstreamBodyUsesRequestBodyForPost(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/cmd/ytmd/seek-to?seconds=42", bytes.NewBufferString(`{"seconds": 7}`))
-	bodyReader, err := buildUpstreamBody(http.MethodPost, req)
+	bodyReader, err := BuildUpstreamBody(http.MethodPost, req)
 	if err != nil {
 		t.Fatalf("buildUpstreamBody returned error: %v", err)
 	}
@@ -69,13 +69,13 @@ func TestBuildUpstreamBodyUsesRequestBodyForPost(t *testing.T) {
 		t.Fatalf("reading body failed: %v", err)
 	}
 	if string(bodyBytes) != `{"seconds": 7}` {
-		t.Fatalf("buildUpstreamBody() = %q, want JSON body", string(bodyBytes))
+		t.Fatalf("BuildUpstreamBody() = %q, want JSON body", string(bodyBytes))
 	}
 }
 
 func TestBuildUpstreamBodyFallsBackToQueryForPost(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/cmd/ytmd/seek-to?seconds=42", nil)
-	bodyReader, err := buildUpstreamBody(http.MethodPost, req)
+	bodyReader, err := BuildUpstreamBody(http.MethodPost, req)
 	if err != nil {
 		t.Fatalf("buildUpstreamBody returned error: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestBuildUpstreamBodyFallsBackToQueryForPost(t *testing.T) {
 		t.Fatalf("reading body failed: %v", err)
 	}
 	if string(bodyBytes) != `{"seconds":42}` {
-		t.Fatalf("buildUpstreamBody() = %q, want numeric query payload", string(bodyBytes))
+		t.Fatalf("BuildUpstreamBody() = %q, want numeric query payload", string(bodyBytes))
 	}
 }
 
@@ -125,9 +125,9 @@ func TestBuildSongInfoResponseWhenPlaying(t *testing.T) {
 		"isPaused": false,
 	}
 
-	resp := buildSongInfoResponse(songPayload)
+	resp := BuildSongInfoResponse(songPayload)
 	if resp.ExitCode != 0 {
-		t.Fatalf("buildSongInfoResponse() exitCode = %d, want 0", resp.ExitCode)
+		t.Fatalf("BuildSongInfoResponse() exitCode = %d, want 0", resp.ExitCode)
 	}
 	if !strings.Contains(resp.Message, "Song:") {
 		t.Fatalf("message = %q, want song prefix", resp.Message)
@@ -143,9 +143,9 @@ func TestBuildSongInfoResponseWhenPaused(t *testing.T) {
 		"isPaused": true,
 	}
 
-	resp := buildSongInfoResponse(songPayload)
+	resp := BuildSongInfoResponse(songPayload)
 	if resp.ExitCode != 0 {
-		t.Fatalf("buildSongInfoResponse() exitCode = %d, want 0", resp.ExitCode)
+		t.Fatalf("BuildSongInfoResponse() exitCode = %d, want 0", resp.ExitCode)
 	}
 	if !strings.Contains(resp.Message, "Playback state: paused") {
 		t.Fatalf("message = %q, want paused state", resp.Message)

@@ -6,21 +6,8 @@ import (
 	"strings"
 )
 
-func buildQueueInfoResponse(songPayload, queuePayload any) responseEnvelope {
-	songData := map[string]any{}
-	if songPayloadMap, ok := songPayload.(map[string]any); ok {
-		songData = songPayloadMap
-	}
-	if nested, ok := songPayloadMapValue(songData, "data"); ok {
-		for key, value := range nested {
-			songData[key] = value
-		}
-	}
-	if nested, ok := songPayloadMapValue(songData, "song"); ok {
-		for key, value := range nested {
-			songData[key] = value
-		}
-	}
+func BuildQueueInfoResponse(songPayload, queuePayload any) responseEnvelope {
+	songData := flattenSongPayload(songPayload)
 
 	queueData := map[string]any{}
 	if queuePayloadMap, ok := queuePayload.(map[string]any); ok {
@@ -54,11 +41,7 @@ func buildQueueInfoResponse(songPayload, queuePayload any) responseEnvelope {
 	return responseEnvelope{ExitCode: 0, Message: message, Data: map[string]any{"songs": summary.Items, "totalSeconds": summary.TotalDurationSeconds, "display": summary.Display, "count": len(summary.Items)}}
 }
 
-func BuildQueueInfoResponse(songPayload, queuePayload any) any {
-	return buildQueueInfoResponse(songPayload, queuePayload)
-}
-
-func buildSongRequestResponse(videoID string, queuePayload any, lookup SongLookup) responseEnvelope {
+func BuildSongRequestResponse(videoID string, queuePayload any, lookup SongLookup) responseEnvelope {
 	data := map[string]any{"videoId": videoID}
 	title := lookup.Title
 	artist := lookup.Artist
@@ -120,10 +103,6 @@ func extractSongMetadata(payload map[string]any) (string, string) {
 	return title, artist
 }
 
-func BuildSongRequestResponse(videoID string, queuePayload any, lookup SongLookup) any {
-	return buildSongRequestResponse(videoID, queuePayload, lookup)
-}
-
 func QueueContainsVideoID(payload any, videoID string) bool {
 	for _, item := range orderedQueueItemsArray(payload) {
 		itemMap, ok := item.(map[string]any)
@@ -142,20 +121,7 @@ func QueueContainsVideoID(payload any, videoID string) bool {
 }
 
 func CurrentSongVideoID(songPayload any) string {
-	songData := map[string]any{}
-	if songPayloadMap, ok := songPayload.(map[string]any); ok {
-		songData = songPayloadMap
-	}
-	if nested, ok := songPayloadMapValue(songData, "data"); ok {
-		for key, value := range nested {
-			songData[key] = value
-		}
-	}
-	if nested, ok := songPayloadMapValue(songData, "song"); ok {
-		for key, value := range nested {
-			songData[key] = value
-		}
-	}
+	songData := flattenSongPayload(songPayload)
 
 	videoID := asString(songData["videoId"])
 	if videoID == "" {

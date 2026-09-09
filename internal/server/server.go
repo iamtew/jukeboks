@@ -233,7 +233,7 @@ func (s *Server) songRequestHandler(w http.ResponseWriter, r *http.Request) {
 		queuePayload = freshQueue
 	}
 
-	s.Seed.ReconcileQueue(queuePayload, ytmd.CurrentSongVideoID(songPayload))
+	s.Seed.SyncFromQueue(queuePayload, ytmd.CurrentSongVideoID(songPayload))
 
 	writeJSON(w, ytmd.BuildSongRequestResponse(videoID, queuePayload, lookup))
 }

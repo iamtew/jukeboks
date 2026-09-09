@@ -25,7 +25,7 @@ func TestStateRegisterAndReconcile(t *testing.T) {
 		t.Fatalf("snapshot = active:%v count:%d playlists:%d", active, count, playlistCount)
 	}
 
-	state.ReconcileQueue(queueWithSelected("abc12345678", "xyz00000000"), "")
+	state.SyncFromQueue(queueWithSelected("abc12345678", "xyz00000000"), "")
 	if !state.IsActive() {
 		t.Fatal("expected seed mode active while a seed track is playing")
 	}
@@ -66,8 +66,15 @@ func TestSyncRebuildsRequestOrderFromQueue(t *testing.T) {
 	if state.RequestCount() != 2 {
 		t.Fatalf("request count = %d, want 2", state.RequestCount())
 	}
-	ids := state.RequestIDSet()
-	if _, ok := ids["req11111111"]; !ok {
+	ids := state.RequestIDs()
+	found := false
+	for _, id := range ids {
+		if id == "req11111111" {
+			found = true
+			break
+		}
+	}
+	if !found {
 		t.Fatal("missing req11111111 after sync")
 	}
 	if got := state.RequestInsertIndex(queue, "seed1111111"); got != 3 {
@@ -78,7 +85,7 @@ func TestSyncRebuildsRequestOrderFromQueue(t *testing.T) {
 func TestStateReconcileKeepsActiveWithoutSelectedFlag(t *testing.T) {
 	state := NewState()
 	state.RegisterEnqueue("PLtest", []string{"abc12345678", "def98765432"})
-	state.ReconcileQueue(map[string]any{
+	state.SyncFromQueue(map[string]any{
 		"items": []any{
 			map[string]any{"playlistPanelVideoRenderer": map[string]any{"videoId": "abc12345678"}},
 			map[string]any{"playlistPanelVideoRenderer": map[string]any{"videoId": "xyz00000000"}},
@@ -92,7 +99,7 @@ func TestStateReconcileKeepsActiveWithoutSelectedFlag(t *testing.T) {
 func TestStateReconcileKeepsActiveWhenUpcomingSeedTracks(t *testing.T) {
 	state := NewState()
 	state.RegisterEnqueue("PLtest", []string{"abc12345678", "def98765432"})
-	state.ReconcileQueue(queueWithSelected("abc12345678", "def98765432"), "")
+	state.SyncFromQueue(queueWithSelected("abc12345678", "def98765432"), "")
 	if !state.IsActive() {
 		t.Fatal("expected seed mode active while upcoming seed tracks remain")
 	}
@@ -101,7 +108,7 @@ func TestStateReconcileKeepsActiveWhenUpcomingSeedTracks(t *testing.T) {
 func TestStateReconcileIgnoresEmptyQueueSnapshot(t *testing.T) {
 	state := NewState()
 	state.RegisterEnqueue("PLtest", []string{"abc12345678"})
-	state.ReconcileQueue(map[string]any{}, "")
+	state.SyncFromQueue(map[string]any{}, "")
 	if !state.IsActive() {
 		t.Fatal("expected seed mode to stay active when queue snapshot is empty")
 	}
@@ -145,7 +152,7 @@ func TestClearQueueOnRequestStyleSyncKeepsRequestFIFO(t *testing.T) {
 func TestStateReconcileDeactivatesWhenSeedAndRequestsAreGone(t *testing.T) {
 	state := NewState()
 	state.RegisterEnqueue("PLtest", []string{"abc12345678", "def98765432"})
-	state.ReconcileQueue(queueWithSelected("xyz00000000", "req11111111"), "")
+	state.SyncFromQueue(queueWithSelected("xyz00000000", "req11111111"), "")
 	if state.IsActive() {
 		t.Fatal("expected seed mode inactive when no seed or tracked request remains")
 	}

@@ -1,7 +1,6 @@
 package ytmd
 
 import (
-	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
@@ -61,28 +60,6 @@ func ClassifySongRequestInput(input string) (videoID string, urlLike bool) {
 		return "", true
 	}
 	return "", false
-}
-
-// LooksLikeURL reports whether input appears to be a URL (or scheme-less link
-// host) rather than a free-text song query.
-func LooksLikeURL(input string) bool {
-	input = normalizeSongRequestInput(input)
-	if input == "" || bareVideoIDPattern.MatchString(input) {
-		return false
-	}
-	return hasURLShape(input)
-}
-
-func ExtractVideoID(input string) (string, error) {
-	input = normalizeSongRequestInput(input)
-	if input == "" {
-		return "", fmt.Errorf("empty input")
-	}
-
-	if id, _ := ClassifySongRequestInput(input); id != "" {
-		return id, nil
-	}
-	return "", fmt.Errorf("invalid YouTube URL or video ID")
 }
 
 func normalizeSongRequestInput(input string) string {

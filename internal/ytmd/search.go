@@ -100,14 +100,6 @@ func findQueueEntryForVideoID(payload any, videoID string) (queueEntrySummary, b
 	return best, bestScore >= 0
 }
 
-func findFirstSearchResult(payload any) (queueEntrySummary, bool) {
-	entries := collectSearchResults(payload, 1)
-	if len(entries) == 0 {
-		return queueEntrySummary{}, false
-	}
-	return entries[0], true
-}
-
 func findBestSearchResult(payload any, query string) (queueEntrySummary, bool) {
 	entries := collectSearchResults(payload, 40)
 	if len(entries) == 0 {

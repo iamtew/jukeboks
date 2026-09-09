@@ -12,8 +12,8 @@ import (
 
 type loggingResponseWriter struct {
 	http.ResponseWriter
-	status int
-	body   bytes.Buffer
+	status      int
+	body        bytes.Buffer
 	captureBody bool
 }
 
@@ -51,8 +51,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 			captureBody:    isJB,
 		}
 
-		ctx := httplog.WithScope(r.Context())
-		next.ServeHTTP(lw, r.WithContext(ctx))
+		next.ServeHTTP(lw, r)
 
 		if isJB && lw.body.Len() > 0 {
 			var env Envelope

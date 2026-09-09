@@ -242,11 +242,11 @@ func (s *Server) seedEnqueueHandler(w http.ResponseWriter, r *http.Request) {
 		ExitCode: 0,
 		Message:  fmt.Sprintf("Added %d tracks from %s to queue", added, lookup.Name),
 		Data: map[string]any{
-			"playlistId": lookup.ID,
-			"name":       lookup.Name,
-			"added":      added,
-			"skipped":    skipped,
-			"trackCount": len(lookup.Tracks),
+			"playlistId":     lookup.ID,
+			"name":           lookup.Name,
+			"added":          added,
+			"skipped":        skipped,
+			"trackCount":     len(lookup.Tracks),
 			"seedModeActive": true,
 		},
 	})
@@ -284,13 +284,13 @@ func (s *Server) seedRemoveFromQueueHandler(w http.ResponseWriter, r *http.Reque
 
 	queuePayload, _ = s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/queue", 2, 250)
 	songPayload, _ := s.YTMD.FetchJSONWithRetry(r.Context(), "/api/v1/song", 2, 250)
-	s.Seed.ReconcileQueue(queuePayload, ytmd.CurrentSongVideoID(songPayload))
+	s.Seed.SyncFromQueue(queuePayload, ytmd.CurrentSongVideoID(songPayload))
 
 	writeJSON(w, Envelope{
 		ExitCode: 0,
 		Message:  fmt.Sprintf("Removed %d seed tracks from queue", len(indices)),
 		Data: map[string]any{
-			"removed": len(indices),
+			"removed":        len(indices),
 			"seedModeActive": s.Seed.IsActive(),
 		},
 	})

@@ -39,7 +39,6 @@
       <section class="player-toggles" aria-label="Playback modes">
         <button id="shuffleButton" class="control-btn" type="button" aria-label="Shuffle" aria-pressed="false">Shuffle</button>
         <input id="songRequestInput" class="player-toggles__input" type="search" placeholder="Request song…" aria-label="Song request" autocomplete="off" />
-        <button id="autoplayButton" class="control-btn control-btn--readonly" type="button" aria-label="Autoplay" aria-pressed="false" aria-disabled="true" title="Autoplay toggle is not exposed by the YTMD API (queue autoPlaying does not match the player toggle)">Autoplay</button>
       </section>
 
       <nav class="tabs" aria-label="Admin sections">
@@ -96,20 +95,6 @@
             <input id="argInput" type="text" placeholder="Optional params, e.g. seconds=10" />
             <button id="runCommand">Run</button>
           </div>
-          <div class="command-table-wrap">
-            <table class="command-table">
-              <thead>
-                <tr>
-                  <th>Command</th>
-                  <th>Methods</th>
-                  <th>Route</th>
-                  <th>Description</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="commandTableBody"></tbody>
-            </table>
-          </div>
           <div class="url-box">
             <label for="commandUrl">Manual URL</label>
             <div class="url-row">
@@ -143,7 +128,6 @@
           <div class="settings-block">
             <h4>Blacklist</h4>
             <p class="muted">This list blocks songs or artists from being queued or played.</p>
-            <p class="muted" id="configPathLabel">Config file: jukeboks.json</p>
             <ul id="blacklistList" class="chip-list"></ul>
           </div>
           <div class="settings-block settings-json-block">

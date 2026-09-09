@@ -49,7 +49,7 @@ func main() {
 		log.Fatalf("failed to initialize config: %v", err)
 	}
 
-	target := &url.URL{Scheme: "http", Host: netJoin(*ytmdHost, *ytmdPort)}
+	target := &url.URL{Scheme: "http", Host: net.JoinHostPort(*ytmdHost, *ytmdPort)}
 	client := ytmd.NewClient(target)
 	srv := server.New(store, client, webroot)
 
@@ -147,8 +147,4 @@ func listenWithFallback(port string) (net.Listener, string, error) {
 	}
 
 	return nil, "", fmt.Errorf("unable to bind to port %s or any fallback ports", port)
-}
-
-func netJoin(host, port string) string {
-	return host + ":" + port
 }

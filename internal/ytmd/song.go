@@ -17,7 +17,7 @@ type CurrentSong struct {
 	State  string
 }
 
-func ParseCurrentSong(songPayload any) CurrentSong {
+func flattenSongPayload(songPayload any) map[string]any {
 	songData := map[string]any{}
 	if songPayloadMap, ok := songPayload.(map[string]any); ok {
 		songData = songPayloadMap
@@ -32,6 +32,11 @@ func ParseCurrentSong(songPayload any) CurrentSong {
 			songData[key] = value
 		}
 	}
+	return songData
+}
+
+func ParseCurrentSong(songPayload any) CurrentSong {
+	songData := flattenSongPayload(songPayload)
 
 	title := asString(songData["title"])
 	artist := asString(songData["artist"])
@@ -68,7 +73,7 @@ func ParseCurrentSong(songPayload any) CurrentSong {
 	return CurrentSong{Title: title, Artist: artist, State: state}
 }
 
-func buildSongInfoResponse(songPayload any) responseEnvelope {
+func BuildSongInfoResponse(songPayload any) responseEnvelope {
 	song := ParseCurrentSong(songPayload)
 	title := song.Title
 	artist := song.Artist
@@ -80,8 +85,4 @@ func buildSongInfoResponse(songPayload any) responseEnvelope {
 
 	message := fmt.Sprintf("Song: %s — %s. Playback state: %s.", title, artist, state)
 	return responseEnvelope{ExitCode: 0, Message: message, Data: map[string]any{"title": title, "artist": artist, "state": state}}
-}
-
-func BuildSongInfoResponse(songPayload any) any {
-	return buildSongInfoResponse(songPayload)
 }

@@ -23,7 +23,6 @@
     songDuration: 0,
     position: 0,
     pauseFadeTimer: null,
-    glowAnimationFrame: null,
     isPlaybackActive: false,
   };
 
@@ -149,67 +148,22 @@
     ui.totalTime.textContent = formatTime(remaining);
   }
 
-  // Turn the chromatic glow off completely when the overlay is dimmed or inactive.
-  function setGlowEffectDisabled() {
-    if (ui.songInfo) {
-      ui.songInfo.style.textShadow = "none";
-    }
-  }
-
-  // Animate the glow with a sine-wave pulse so it feels alive without tracking playback progress.
-  function updateGlowPulse(timestamp) {
-    if (!ui.songInfo || !state.isPlaybackActive) {
-      setGlowEffectDisabled();
-      state.glowAnimationFrame = null;
-      return;
-    }
-
-    const opacityValue = parseFloat(ui.songInfo.style.opacity || "1");
-    if (opacityValue < 0.99) {
-      setGlowEffectDisabled();
-      state.glowAnimationFrame = window.requestAnimationFrame(updateGlowPulse);
-      return;
-    }
-
-    const speedScale = pulseSpeed <= 0 ? 0 : Math.max(0.1, pulseSpeed / 5);
-    const pulse = (Math.sin(timestamp * 0.003 * speedScale) + 1) / 2;
-    const intensity = 0.2 + pulse * 0.8;
-    const glowSpread = 4 + intensity * 16;
-    const sideOffset = 1.5 + intensity * 5;
-    const primaryAlpha = 0.2 + intensity * 0.55;
-    const secondaryAlpha = 0.12 + intensity * 0.3;
-    const tertiaryAlpha = 0.08 + intensity * 0.25;
-
-    ui.songInfo.style.textShadow = `
-      0px 0px ${glowSpread}px rgba(209, 76, 255, ${primaryAlpha}),
-      ${sideOffset}px 0px ${glowSpread - 4}px rgba(255, 0, 255, ${secondaryAlpha}),
-      ${-sideOffset}px 0px ${glowSpread - 4}px rgba(0, 255, 255, ${tertiaryAlpha})
-    `;
-
-    state.glowAnimationFrame = window.requestAnimationFrame(updateGlowPulse);
-  }
-
+  // Chromatic glow is a CSS keyframe; JS only toggles the class and duration.
   function startGlowPulse() {
+    if (!ui.songInfo) return;
     if (pulseSpeed <= 0) {
       stopGlowPulse();
       return;
     }
-
-    if (state.glowAnimationFrame) {
-      cancelAnimationFrame(state.glowAnimationFrame);
-    }
-
+    const speedScale = Math.max(0.1, pulseSpeed / 5);
+    ui.songInfo.style.setProperty("--glow-duration", `${(2 / speedScale).toFixed(2)}s`);
+    ui.songInfo.classList.add("is-glowing");
     state.isPlaybackActive = true;
-    state.glowAnimationFrame = window.requestAnimationFrame(updateGlowPulse);
   }
 
   function stopGlowPulse() {
     state.isPlaybackActive = false;
-    if (state.glowAnimationFrame) {
-      cancelAnimationFrame(state.glowAnimationFrame);
-      state.glowAnimationFrame = null;
-    }
-    setGlowEffectDisabled();
+    ui.songInfo?.classList.remove("is-glowing");
   }
 
   function formatTime(sec) {

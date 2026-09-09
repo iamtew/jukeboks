@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestFindFirstSearchResultFromListItem(t *testing.T) {
+func TestCollectSearchResultFromListItem(t *testing.T) {
 	payload := map[string]any{
 		"contents": map[string]any{
 			"tabbedSearchResultsRenderer": map[string]any{
@@ -49,10 +49,11 @@ func TestFindFirstSearchResultFromListItem(t *testing.T) {
 		},
 	}
 
-	entry, ok := findFirstSearchResult(payload)
-	if !ok {
-		t.Fatal("findFirstSearchResult() ok = false, want true")
+	entries := collectSearchResults(payload, 1)
+	if len(entries) == 0 {
+		t.Fatal("collectSearchResults() empty, want entry")
 	}
+	entry := entries[0]
 	if entry.VideoID != "abc12345678" {
 		t.Fatalf("videoId = %q, want abc12345678", entry.VideoID)
 	}
@@ -67,7 +68,7 @@ func TestFindFirstSearchResultFromListItem(t *testing.T) {
 	}
 }
 
-func TestFindFirstSearchResultFromMusicCardShelf(t *testing.T) {
+func TestCollectSearchResultFromMusicCardShelf(t *testing.T) {
 	payload := map[string]any{
 		"contents": []any{
 			map[string]any{
@@ -92,10 +93,11 @@ func TestFindFirstSearchResultFromMusicCardShelf(t *testing.T) {
 		},
 	}
 
-	entry, ok := findFirstSearchResult(payload)
-	if !ok {
-		t.Fatal("findFirstSearchResult() ok = false, want true")
+	entries := collectSearchResults(payload, 1)
+	if len(entries) == 0 {
+		t.Fatal("collectSearchResults() empty, want entry")
 	}
+	entry := entries[0]
 	if entry.VideoID != "dQw4w9WgXcQ" {
 		t.Fatalf("videoId = %q, want dQw4w9WgXcQ", entry.VideoID)
 	}
@@ -110,7 +112,7 @@ func TestFindFirstSearchResultFromMusicCardShelf(t *testing.T) {
 	}
 }
 
-func TestFindFirstSearchResultFromMusicCardShelfSongType(t *testing.T) {
+func TestCollectSearchResultFromMusicCardShelfSongType(t *testing.T) {
 	payload := map[string]any{
 		"contents": []any{
 			map[string]any{
@@ -135,10 +137,11 @@ func TestFindFirstSearchResultFromMusicCardShelfSongType(t *testing.T) {
 		},
 	}
 
-	entry, ok := findFirstSearchResult(payload)
-	if !ok {
-		t.Fatal("findFirstSearchResult() ok = false, want true")
+	entries := collectSearchResults(payload, 1)
+	if len(entries) == 0 {
+		t.Fatal("collectSearchResults() empty, want entry")
 	}
+	entry := entries[0]
 	if entry.VideoID != "dQw4w9WgXcQ" {
 		t.Fatalf("videoId = %q, want dQw4w9WgXcQ", entry.VideoID)
 	}
@@ -196,7 +199,7 @@ func TestExtractArtistFromSearchSubtitle(t *testing.T) {
 	}
 }
 
-func TestFindFirstSearchResultReturnsFirstMatch(t *testing.T) {
+func TestCollectSearchResultReturnsFirstMatch(t *testing.T) {
 	payload := map[string]any{
 		"contents": []any{
 			map[string]any{
@@ -222,10 +225,11 @@ func TestFindFirstSearchResultReturnsFirstMatch(t *testing.T) {
 		},
 	}
 
-	entry, ok := findFirstSearchResult(payload)
-	if !ok {
-		t.Fatal("findFirstSearchResult() ok = false, want true")
+	entries := collectSearchResults(payload, 1)
+	if len(entries) == 0 {
+		t.Fatal("collectSearchResults() empty, want entry")
 	}
+	entry := entries[0]
 	if entry.VideoID != "first1234567" {
 		t.Fatalf("videoId = %q, want first1234567", entry.VideoID)
 	}
@@ -326,10 +330,10 @@ func TestQueryRelevanceScore(t *testing.T) {
 	}
 }
 
-func TestFindFirstSearchResultEmpty(t *testing.T) {
-	_, ok := findFirstSearchResult(map[string]any{})
-	if ok {
-		t.Fatal("findFirstSearchResult() ok = true, want false")
+func TestCollectSearchResultEmpty(t *testing.T) {
+	entries := collectSearchResults(map[string]any{}, 1)
+	if len(entries) != 0 {
+		t.Fatal("collectSearchResults() nonempty, want empty")
 	}
 }
 

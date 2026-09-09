@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -24,21 +23,7 @@ type Client struct {
 func NewClient(base *url.URL) *Client {
 	return &Client{
 		Base: base,
-		HTTP: &http.Client{
-			Timeout: defaultTimeout,
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-				DialContext: (&net.Dialer{
-					Timeout:   2 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-				ForceAttemptHTTP2:     true,
-				MaxIdleConns:          10,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   5 * time.Second,
-				ResponseHeaderTimeout: 5 * time.Second,
-			},
-		},
+		HTTP: &http.Client{Timeout: defaultTimeout},
 	}
 }
 
@@ -51,7 +36,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	if resp != nil {
 		status = resp.StatusCode
 	}
-	httplog.LogUpstream(req.Context(), req.Method, req.URL.String(), status, duration)
+	httplog.LogUpstream(req.Method, req.URL.String(), status, duration)
 
 	return resp, err
 }

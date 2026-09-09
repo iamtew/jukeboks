@@ -1,7 +1,6 @@
 package httplog
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,12 +17,6 @@ var (
 
 	colorInit sync.Once
 )
-
-type scopeKey struct{}
-
-type scope struct {
-	active bool
-}
 
 const (
 	reset   = "\033[0m"
@@ -60,18 +53,6 @@ func isTerminal(w io.Writer) bool {
 		return false
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
-}
-
-func WithScope(ctx context.Context) context.Context {
-	return context.WithValue(ctx, scopeKey{}, &scope{active: true})
-}
-
-func FromContext(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	s, ok := ctx.Value(scopeKey{}).(*scope)
-	return ok && s != nil && s.active
 }
 
 func ShouldLogPath(path string) bool {
@@ -116,8 +97,8 @@ func LogRequest(method, path, query string, status int, duration time.Duration) 
 	)
 }
 
-func LogUpstream(ctx context.Context, method, url string, status int, duration time.Duration) {
-	if !Enabled || !FromContext(ctx) {
+func LogUpstream(method, url string, status int, duration time.Duration) {
+	if !Enabled {
 		return
 	}
 	writeUpstream(method, url, status, duration)

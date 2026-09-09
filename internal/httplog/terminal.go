@@ -33,14 +33,14 @@ func (w *terminalWriter) Write(p []byte) (int, error) {
 }
 
 var (
-	terminalMu       sync.Mutex
-	terminalActive   bool
-	terminalOut      *terminalWriter
-	terminalHeight   int
-	terminalWidth    int
-	headerListenURL  string
-	headerPoll       func(context.Context) (SongStatus, error)
-	headerStop       context.CancelFunc
+	terminalMu      sync.Mutex
+	terminalActive  bool
+	terminalOut     *terminalWriter
+	terminalHeight  int
+	terminalWidth   int
+	headerListenURL string
+	headerPoll      func(context.Context) (SongStatus, error)
+	headerStop      context.CancelFunc
 )
 
 func SetupTerminal(listenURL string, poll func(context.Context) (SongStatus, error)) {

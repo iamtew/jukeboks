@@ -2,7 +2,6 @@ package httplog
 
 import (
 	"bytes"
-	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -70,7 +69,7 @@ func TestLogRequestWithoutColor(t *testing.T) {
 	}
 }
 
-func TestLogUpstreamRequiresScope(t *testing.T) {
+func TestLogUpstream(t *testing.T) {
 	var buf bytes.Buffer
 	oldOut := Out
 	oldUseColor := UseColor
@@ -84,13 +83,7 @@ func TestLogUpstreamRequiresScope(t *testing.T) {
 		Enabled = oldEnabled
 	})
 
-	LogUpstream(context.Background(), http.MethodPost, "http://localhost:26538/api/v1/search", 200, 5*time.Millisecond)
-	if buf.Len() != 0 {
-		t.Fatalf("expected no output without scope, got %q", buf.String())
-	}
-
-	ctx := WithScope(context.Background())
-	LogUpstream(ctx, http.MethodPost, "http://localhost:26538/api/v1/search", 200, 5*time.Millisecond)
+	LogUpstream(http.MethodPost, "http://localhost:26538/api/v1/search", 200, 5*time.Millisecond)
 	if !strings.Contains(buf.String(), "POST") || !strings.Contains(buf.String(), "/api/v1/search") {
 		t.Fatalf("unexpected upstream output: %q", buf.String())
 	}

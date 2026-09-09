@@ -82,29 +82,10 @@ func (s *State) IsActive() bool {
 	return s.Active
 }
 
-func (s *State) Clear() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Active = false
-	s.SeedIDs = map[string]struct{}{}
-	s.Requests = nil
-	s.PlaylistIDs = map[string]struct{}{}
-}
-
 func (s *State) VideoIDSet() map[string]struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return copyStringSet(s.SeedIDs)
-}
-
-func (s *State) RequestIDSet() map[string]struct{} {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make(map[string]struct{}, len(s.Requests))
-	for _, id := range s.Requests {
-		out[id] = struct{}{}
-	}
-	return out
 }
 
 func (s *State) RequestIDs() []string {
@@ -172,10 +153,6 @@ func (s *State) SyncFromQueue(queuePayload any, currentVideoID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.syncFromQueueLocked(queuePayload, currentVideoID)
-}
-
-func (s *State) ReconcileQueue(queuePayload any, currentVideoID string) {
-	s.SyncFromQueue(queuePayload, currentVideoID)
 }
 
 func (s *State) syncFromQueueLocked(queuePayload any, currentVideoID string) {

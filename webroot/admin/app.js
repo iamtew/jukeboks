@@ -31,14 +31,12 @@ const urlInput = document.getElementById('commandUrl');
 const copyButton = document.getElementById('copyUrl');
 const tabs = document.querySelectorAll('.tab');
 const pages = document.querySelectorAll('.page');
-const tableBody = document.getElementById('commandTableBody');
 const queueList = document.getElementById('queueList');
 const clearQueueButton = document.getElementById('clearQueueButton');
 const blacklistInput = document.getElementById('blacklistInput');
 const addBlacklistButton = document.getElementById('addBlacklistButton');
 const blacklistList = document.getElementById('blacklistList');
 const settingsOutput = document.getElementById('settingsOutput');
-const configPathLabel = document.getElementById('configPathLabel');
 const maxDurationInput = document.getElementById('maxDurationInput');
 const saveMaxDurationButton = document.getElementById('saveMaxDurationButton');
 const currentMeta = document.getElementById('currentMeta');
@@ -55,7 +53,6 @@ const playerButtons = {
   forward: document.getElementById('forwardButton'),
   next: document.getElementById('nextButton'),
   shuffle: document.getElementById('shuffleButton'),
-  autoplay: document.getElementById('autoplayButton'),
 };
 const songRequestInput = document.getElementById('songRequestInput');
 const seedStatusLine = document.getElementById('seedStatusLine');
@@ -79,39 +76,17 @@ function updateSelection(selected) {
 
 function renderCommands() {
   select.innerHTML = '';
-  tableBody.innerHTML = '';
 
   commands.forEach((cmd) => {
     const option = document.createElement('option');
     option.value = cmd.name;
     option.textContent = `${cmd.name} (${cmd.methods.join(', ')})`;
-    option.dataset.description = cmd.description;
     select.appendChild(option);
-
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td><strong>${cmd.name}</strong></td>
-      <td>${cmd.methods.map((method) => `<span class="method-pill">${method}</span>`).join('')}</td>
-      <td><code>${cmd.path}</code></td>
-      <td>${cmd.description}</td>
-      <td><button class="command-link" type="button" data-command="${cmd.name}">Use</button></td>
-    `;
-    tableBody.appendChild(row);
   });
 
   select.addEventListener('change', () => {
     const selected = commands.find((cmd) => cmd.name === select.value);
     updateSelection(selected);
-  });
-
-  tableBody.querySelectorAll('.command-link').forEach((button) => {
-    button.addEventListener('click', () => {
-      const selected = commands.find((cmd) => cmd.name === button.dataset.command);
-      if (!selected) return;
-      select.value = selected.name;
-      updateSelection(selected);
-      argInput.focus();
-    });
   });
 
   if (commands.length > 0) {
@@ -374,7 +349,6 @@ async function loadSettings() {
       throw new Error(payload.message || 'Unable to load settings');
     }
     renderBlacklist(payload.data?.blacklist || []);
-    configPathLabel.textContent = 'Config file: jukeboks.json';
     if (Number.isFinite(payload.data?.maxDuration)) {
       maxDurationInput.value = String(payload.data.maxDuration);
     }
@@ -949,10 +923,6 @@ function updatePlaybackButtons() {
     playerButtons.pause.classList.toggle('is-active', playbackState.hasSong && playbackState.isPaused);
   }
   setToggleButtonState(playerButtons.shuffle, playbackState.shuffle);
-  if (playerButtons.autoplay) {
-    playerButtons.autoplay.classList.remove('is-active');
-    playerButtons.autoplay.setAttribute('aria-pressed', 'false');
-  }
 }
 
 function updateProgressBar() {
@@ -1275,111 +1245,6 @@ function collectQueueEntriesFallback(value, collected = [], seen = new WeakSet()
   return collected;
 }
 
-function collectQueueEntries(value, collected = [], seen = new WeakSet(), seenKeys = new Set(), queueIndex = null, treatArraysAsQueue = false) {
-  if (treatArraysAsQueue && Array.isArray(value)) {
-    return collectOrderedQueueEntries(value);
-  }
-  if (value && typeof value === 'object' && !Array.isArray(value) && getOrderedQueueItemsArray(value)) {
-    return collectOrderedQueueEntries(value);
-  }
-  return collectQueueEntriesFallback(value, collected, seen, queueIndex, treatArraysAsQueue);
-}
-
-function collectQueueEntrySignatures(item, normalizedEntry) {
-  const signatures = [];
-  const canonicalTitle = canonicalizeQueueTitle(normalizedEntry?.title || '', normalizedEntry?.artist || '');
-  const canonicalArtist = normalizeBylineArtist(normalizedEntry?.artist || '');
-  const titleKey = normalizeText(canonicalTitle);
-  const artistKey = normalizeText(canonicalArtist);
-
-  if (titleKey && artistKey) {
-    signatures.push(`pair:${artistKey}::${titleKey}`);
-  }
-
-  if (normalizedEntry?.videoId && (!titleKey || !artistKey)) {
-    signatures.push(`video:${String(normalizedEntry.videoId).toLowerCase()}`);
-  }
-
-  const titleVariants = collectQueueTitleVariants(item, normalizedEntry);
-  const artistVariants = collectQueueArtistVariants(item, normalizedEntry);
-  for (const title of titleVariants) {
-    for (const artist of artistVariants) {
-      if (title && artist) {
-        signatures.push(`title:${title.toLowerCase()}|artist:${artist.toLowerCase()}`);
-      }
-    }
-  }
-
-  if (titleVariants[0] && artistVariants[0]) {
-    signatures.push(`title:${titleVariants[0].toLowerCase()}|artist:${artistVariants[0].toLowerCase()}`);
-  }
-
-  return [...new Set(signatures.filter(Boolean))];
-}
-
-function collectQueueTitleVariants(item, normalizedEntry) {
-  const values = [];
-  const register = (value) => {
-    const text = String(value || '').trim();
-    if (text) {
-      values.push(text);
-    }
-  };
-
-  const renderer = findQueueRendererCandidate(item) || item?.playlistPanelVideoRenderer || item?.videoRenderer || item?.musicResponsiveListItemRenderer || item?.playlistPanelRenderer || null;
-  register(normalizedEntry?.title);
-  register(item?.title);
-  register(item?.titleText);
-  register(item?.displayTitle);
-  register(item?.shortTitle);
-  register(item?.songTitle);
-  register(item?.track);
-  register(item?.name);
-  register(item?.alternativeTitle);
-  register(item?.altTitle);
-  register(item?.secondaryTitle);
-  register(renderer?.title && extractTextFromRuns(renderer?.title));
-  register(renderer?.titleText && extractTextFromRuns(renderer?.titleText));
-  register(renderer?.displayTitle && extractTextFromRuns(renderer?.displayTitle));
-  register(renderer?.shortTitle && extractTextFromRuns(renderer?.shortTitle));
-  register(renderer?.songTitle && extractTextFromRuns(renderer?.songTitle));
-  register(renderer?.track && extractTextFromRuns(renderer?.track));
-  register(renderer?.name && extractTextFromRuns(renderer?.name));
-  register(renderer?.alternativeTitle && extractTextFromRuns(renderer?.alternativeTitle));
-  register(renderer?.altTitle && extractTextFromRuns(renderer?.altTitle));
-  register(renderer?.secondaryTitle && extractTextFromRuns(renderer?.secondaryTitle));
-
-  return [...new Set(values.map((value) => value.toLowerCase()))];
-}
-
-function collectQueueArtistVariants(item, normalizedEntry) {
-  const values = [];
-  const register = (value) => {
-    const text = String(value || '').trim();
-    if (text) {
-      values.push(text);
-    }
-  };
-
-  const renderer = findQueueRendererCandidate(item) || item?.playlistPanelVideoRenderer || item?.videoRenderer || item?.musicResponsiveListItemRenderer || item?.playlistPanelRenderer || null;
-  register(normalizedEntry?.artist);
-  register(item?.artist);
-  register(item?.artistName);
-  register(item?.author);
-  register(item?.channel);
-  register(renderer?.artist && extractTextFromRuns(renderer?.artist));
-  register(renderer?.artistName && extractTextFromRuns(renderer?.artistName));
-  register(renderer?.author && extractTextFromRuns(renderer?.author));
-  register(renderer?.channel && extractTextFromRuns(renderer?.channel));
-  register(renderer?.longBylineText && extractTextFromRuns(renderer?.longBylineText));
-  register(renderer?.shortBylineText && extractTextFromRuns(renderer?.shortBylineText));
-  register(renderer?.bylineText && extractTextFromRuns(renderer?.bylineText));
-  register(renderer?.authorText && extractTextFromRuns(renderer?.authorText));
-  register(renderer?.ownerText && extractTextFromRuns(renderer?.ownerText));
-
-  return [...new Set(values.map((value) => value.toLowerCase()))];
-}
-
 function normalizeQueueItem(item) {
   if (!item) return null;
   if (typeof item === 'string') {
@@ -1457,14 +1322,6 @@ function normalizeQueueItem(item) {
 
 function normalizeText(value) {
   return String(value || '').trim().toLowerCase();
-}
-
-function createSongIdentity(source) {
-  if (!source) return { title: '', artist: '', videoId: '' };
-  const title = normalizeText(source.title || source.name || source.track || source.songTitle || '');
-  const artist = normalizeText(source.artist || source.artistName || source.channel || source.author || source.songArtist || '');
-  const videoId = normalizeText(source.videoId || source.id || source.video?.id || source.url || '');
-  return { title, artist, videoId };
 }
 
 function extractQueueIdentity(item) {
@@ -1621,21 +1478,6 @@ function classifyQueueEntries(entries, currentIndex = 0, context = null) {
 
     return { item: entry, kind: 'next', queueIndex };
   });
-}
-
-function buildQueueIdentityKey(entry) {
-  const artist = normalizeBylineArtist(entry?.artist || '');
-  const title = canonicalizeQueueTitle(entry?.title || '', artist);
-  const videoId = normalizeText(entry?.videoId || '').trim();
-  const canonicalTitle = normalizeText(title).trim();
-  const canonicalArtist = normalizeText(artist).trim();
-  if (canonicalTitle || canonicalArtist) {
-    return `pair:${canonicalArtist}::${canonicalTitle}`.toLowerCase();
-  }
-  if (videoId) {
-    return `video:${videoId}`.toLowerCase();
-  }
-  return '';
 }
 
 function renderQueue() {
@@ -1990,9 +1832,6 @@ Object.entries(playerButtons).forEach(([key, button]) => {
   }
 
   button.addEventListener('click', async () => {
-    if (key === 'autoplay') {
-      return;
-    }
     if (key === 'play') {
       playbackState.isPaused = false;
       updatePlaybackButtons();

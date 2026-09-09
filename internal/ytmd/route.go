@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func ytmdRouteForPath(path string) string {
+func RouteForPath(path string) string {
 	path = strings.TrimPrefix(path, "/cmd/ytmd")
 	path = strings.TrimSuffix(path, "/")
 	if path == "" {
@@ -34,10 +34,6 @@ func ytmdRouteForPath(path string) string {
 	}
 
 	return "/api/v1" + trimmedPath
-}
-
-func RouteForPath(path string) string {
-	return ytmdRouteForPath(path)
 }
 
 func resolveUpstreamMethod(requestMethod, path string) string {
@@ -100,7 +96,7 @@ func isSupportedMethod(segment string) bool {
 	}
 }
 
-func buildUpstreamBody(method string, r *http.Request) (io.Reader, error) {
+func BuildUpstreamBody(method string, r *http.Request) (io.Reader, error) {
 	if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch && method != http.MethodDelete {
 		return r.Body, nil
 	}
@@ -135,10 +131,6 @@ func buildUpstreamBody(method string, r *http.Request) (io.Reader, error) {
 	}
 
 	return bytes.NewReader(bodyBytes), nil
-}
-
-func BuildUpstreamBody(method string, r *http.Request) (io.Reader, error) {
-	return buildUpstreamBody(method, r)
 }
 
 func coerceQueryValue(value string) any {
