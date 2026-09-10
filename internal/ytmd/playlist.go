@@ -132,15 +132,48 @@ func extractPlaylistName(payload any) string {
 					return
 				}
 			}
+			if microformat, ok := typed["microformatDataRenderer"].(map[string]any); ok {
+				if title := extractTextFromRunsCommand(microformat["title"]); title != "" {
+					found = title
+					return
+				}
+			}
 			if title := extractTextFromRunsCommand(typed["title"]); title != "" {
 				if _, hasTracks := typed["contents"]; hasTracks {
 					found = title
 					return
 				}
 			}
-			if name := extractTextFromRunsCommand(typed["name"]); name != "" {
-				found = name
-				return
+			for _, nested := range typed {
+				walk(nested)
+			}
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		}
+	}
+	walk(payload)
+	return found
+}
+
+// extractAlbumBrowseID finds an album browse id (MPREb_…) linked from a playlist payload.
+// OLAK5uy_ album-as-playlist browses often omit the title header but still link the album page.
+func extractAlbumBrowseID(payload any) string {
+	var found string
+	var walk func(any)
+	walk = func(value any) {
+		if found != "" {
+			return
+		}
+		switch typed := value.(type) {
+		case map[string]any:
+			if id, ok := typed["browseId"].(string); ok {
+				id = strings.TrimSpace(id)
+				if strings.HasPrefix(id, "MPREb_") {
+					found = id
+					return
+				}
 			}
 			for _, nested := range typed {
 				walk(nested)

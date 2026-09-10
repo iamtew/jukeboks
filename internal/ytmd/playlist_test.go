@@ -139,6 +139,101 @@ func TestExtractPlaylistNameFromResponsiveHeader(t *testing.T) {
 	}
 }
 
+func TestExtractPlaylistNameFromMicroformatAndSimpleText(t *testing.T) {
+	payload := map[string]any{
+		"microformat": map[string]any{
+			"microformatDataRenderer": map[string]any{
+				"title": "Redline",
+			},
+		},
+		"contents": map[string]any{
+			"twoColumnBrowseResultsRenderer": map[string]any{
+				"tabs": []any{
+					map[string]any{
+						"tabRenderer": map[string]any{
+							"content": map[string]any{
+								"sectionListRenderer": map[string]any{
+									"contents": []any{
+										map[string]any{
+											"musicResponsiveHeaderRenderer": map[string]any{
+												"title": map[string]any{"simpleText": "Redline"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	name := extractPlaylistName(payload)
+	if name != "Redline" {
+		t.Fatalf("name = %q, want Redline", name)
+	}
+}
+
+func TestExtractAlbumBrowseIDFromOLAKPlaylistPayload(t *testing.T) {
+	playlistID := "OLAK5uy_lWZFpOGFbOSIMBTWpMuh_kkqESh9sxsuY"
+	payload := map[string]any{
+		"contents": map[string]any{
+			"twoColumnBrowseResultsRenderer": map[string]any{
+				"secondaryContents": map[string]any{
+					"sectionListRenderer": map[string]any{
+						"contents": []any{
+							map[string]any{
+								"musicPlaylistShelfRenderer": map[string]any{
+									"contents": []any{
+										map[string]any{
+											"musicResponsiveListItemRenderer": map[string]any{
+												"videoId": "abc12345678",
+												"title": map[string]any{
+													"runs": []any{map[string]any{"text": "Redline"}},
+												},
+												"menu": map[string]any{
+													"menuRenderer": map[string]any{
+														"items": []any{
+															map[string]any{
+																"menuNavigationItemRenderer": map[string]any{
+																	"navigationEndpoint": map[string]any{
+																		"browseEndpoint": map[string]any{
+																			"browseId": "MPREb_8PMSyG2Y5gX",
+																		},
+																	},
+																},
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if got := extractPlaylistName(payload); got != "" {
+		t.Fatalf("extractPlaylistName() = %q, want empty for OLAK shelf-only payload", got)
+	}
+	lookup, ok := parsePlaylistPayload(playlistID, payload)
+	if !ok {
+		t.Fatal("parsePlaylistPayload() ok = false, want true")
+	}
+	if lookup.Name != playlistID {
+		t.Fatalf("lookup.Name = %q, want playlist id fallback", lookup.Name)
+	}
+	if got := extractAlbumBrowseID(payload); got != "MPREb_8PMSyG2Y5gX" {
+		t.Fatalf("extractAlbumBrowseID() = %q, want MPREb_8PMSyG2Y5gX", got)
+	}
+}
+
 func TestQueueIndicesForVideoIDs(t *testing.T) {
 	payload := map[string]any{
 		"items": []any{

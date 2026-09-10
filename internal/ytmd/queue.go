@@ -638,6 +638,9 @@ func extractTextFromRunsCommand(value any) string {
 		if text, ok := typed["text"].(string); ok {
 			return strings.TrimSpace(text)
 		}
+		if text, ok := typed["simpleText"].(string); ok {
+			return strings.TrimSpace(text)
+		}
 	}
 	return ""
 }

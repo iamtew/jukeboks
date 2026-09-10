@@ -203,34 +203,40 @@ function renderSeedPlaylists(playlists) {
     const item = document.createElement('li');
     item.className = 'seed-list__item';
 
-    const labelButton = document.createElement('button');
-    labelButton.type = 'button';
-    labelButton.className = 'seed-list__label';
+    const label = document.createElement('span');
+    label.className = 'seed-list__label';
     const displayName = playlist.name || playlist.id || '';
     const labelText = `${playlist.trackCount || 0} - ${displayName}`;
-    labelButton.textContent = labelText;
-    labelButton.title = playlist.id && playlist.name && playlist.name !== playlist.id
+    label.textContent = labelText;
+    label.title = playlist.id && playlist.name && playlist.name !== playlist.id
       ? `${labelText} (${playlist.id})`
       : labelText;
-    labelButton.addEventListener('click', () => enqueueSeedPlaylist(playlist.id));
 
-    const removeQueueButton = document.createElement('button');
-    removeQueueButton.type = 'button';
-    removeQueueButton.className = 'seed-list__action';
-    removeQueueButton.textContent = 'Remove from queue';
-    removeQueueButton.addEventListener('click', () => removeSeedTracksFromQueue(playlist.id));
+    const playButton = document.createElement('button');
+    playButton.type = 'button';
+    playButton.className = 'queue-action-btn queue-action-btn--play';
+    playButton.textContent = '⏵';
+    playButton.setAttribute('aria-label', 'Enqueue seed playlist');
+    playButton.addEventListener('click', () => enqueueSeedPlaylist(playlist.id));
+
+    const purgeButton = document.createElement('button');
+    purgeButton.type = 'button';
+    purgeButton.className = 'seed-list__action';
+    purgeButton.textContent = 'Purge';
+    purgeButton.addEventListener('click', () => removeSeedTracksFromQueue(playlist.id));
 
     const removeButton = document.createElement('button');
     removeButton.type = 'button';
-    removeButton.className = 'seed-list__action seed-list__action--danger';
-    removeButton.textContent = 'Remove';
+    removeButton.className = 'queue-action-btn queue-action-btn--delete';
+    removeButton.textContent = 'X';
+    removeButton.setAttribute('aria-label', 'Remove playlist');
     removeButton.addEventListener('click', () => removeSeedPlaylist(playlist.id));
 
     const actions = document.createElement('div');
     actions.className = 'seed-list__actions';
-    actions.append(removeQueueButton, removeButton);
+    actions.append(purgeButton, playButton, removeButton);
 
-    item.append(labelButton, actions);
+    item.append(label, actions);
     seedPlaylistList.appendChild(item);
   });
 }

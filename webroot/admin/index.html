@@ -53,7 +53,6 @@
       <section id="page-queue" class="page active">
         <div class="panel">
           <div class="queue-toolbar">
-            <h3>Queue</h3>
             <button id="clearQueueButton" class="queue-toolbar-btn" type="button">Clear queue</button>
           </div>
           <div id="queueList" class="queue-list"></div>
@@ -62,8 +61,6 @@
 
       <section id="page-seed" class="page">
         <div class="panel">
-          <h3>Seed Playlists</h3>
-          <p class="muted">Fallback playlists for when the queue is empty. Song requests during seed playback are inserted after the current track.</p>
           <p id="seedStatusLine" class="seed-status">Seed mode: loading…</p>
           <div class="settings-block">
             <label for="seedPlaylistInput">Add seed playlist</label>
@@ -78,10 +75,8 @@
               <input id="clearQueueOnRequestCheckbox" type="checkbox" />
               Clear queue on new request
             </label>
-            <p class="muted">When enabled, remaining seed playlist tracks are removed from the queue when a fresh song request arrives during seed mode.</p>
           </div>
           <div class="settings-block">
-            <h4>Saved seed playlists</h4>
             <ul id="seedPlaylistList" class="seed-list"></ul>
           </div>
         </div>
@@ -89,8 +84,6 @@
 
       <section id="page-system" class="page">
         <div class="panel">
-          <h3>API Test Panel</h3>
-          <p class="muted">Run the available YTMD commands through the local server.</p>
           <div class="controls">
             <label for="commandSelect">Command</label>
             <select id="commandSelect"></select>
@@ -110,15 +103,12 @@
 
       <section id="page-settings" class="page">
         <div class="panel">
-          <h3>Settings</h3>
-          <p class="muted">Manage persistent jukeboks settings. Changes are written to jukeboks.json on disk.</p>
           <div class="settings-block">
             <label for="maxDurationInput">maxDuration</label>
             <div class="url-row">
               <input id="maxDurationInput" type="number" min="1" step="1" value="600" />
               <button id="saveMaxDurationButton" type="button">Save</button>
             </div>
-            <p class="muted">Maximum number of seconds a song request can be.</p>
           </div>
           <div class="settings-block">
             <label for="blacklistInput">Add blacklist entry</label>
@@ -129,12 +119,10 @@
           </div>
           <div class="settings-block">
             <h4>Blacklist</h4>
-            <p class="muted">This list blocks songs or artists from being queued or played.</p>
             <ul id="blacklistList" class="chip-list"></ul>
           </div>
           <div class="settings-block settings-json-block">
             <h4>Settings JSON</h4>
-            <p class="muted">This is the current persisted configuration payload written to jukeboks.json.</p>
             <pre id="settingsOutput">Loading settings…</pre>
           </div>
         </div>

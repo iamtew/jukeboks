@@ -166,6 +166,42 @@ func TestConfigGetAndSave(t *testing.T) {
 	}
 }
 
+func TestConfigSavePreservesSeedFields(t *testing.T) {
+	ts, _, dir := newTestEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	path := filepath.Join(dir, "jukeboks.json")
+	seeded := config.Default()
+	seeded.SeedPlaylists = []config.SeedPlaylist{{ID: "PLkeep", Name: "Keep Me", TrackCount: 3}}
+	seeded.ClearQueueOnRequest = true
+	if err := config.Save(path, seeded); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	resp, err := http.Post(ts.URL+"/api/config", "application/json", strings.NewReader(`{"blacklist":["No Rick"],"maxDuration":120}`))
+	if err != nil {
+		t.Fatalf("Post() error = %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	saved := decodeEnvelope(t, body)
+	if saved.ExitCode != 0 {
+		t.Fatalf("save config exitCode = %d message = %q", saved.ExitCode, saved.Message)
+	}
+
+	reloaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if reloaded.MaxDuration != 120 || len(reloaded.Blacklist) != 1 || reloaded.Blacklist[0] != "No Rick" {
+		t.Fatalf("settings fields = blacklist %#v maxDuration %d", reloaded.Blacklist, reloaded.MaxDuration)
+	}
+	if !reloaded.ClearQueueOnRequest {
+		t.Fatal("clearQueueOnRequest was reset")
+	}
+	if len(reloaded.SeedPlaylists) != 1 || reloaded.SeedPlaylists[0].ID != "PLkeep" {
+		t.Fatalf("seedPlaylists = %#v, want PLkeep preserved", reloaded.SeedPlaylists)
+	}
+}
+
 func TestProxyBlocksBlacklistedCommand(t *testing.T) {
 	called := false
 	ts, _, _ := newTestEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

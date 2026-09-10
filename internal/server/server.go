@@ -82,12 +82,22 @@ func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, Envelope{ExitCode: 0, Data: cfg})
 	case http.MethodPost, http.MethodPut:
-		var cfg config.Config
-		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		existing, err := s.Config.Get()
+		if err != nil {
+			writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to load config: %v", err)})
+			return
+		}
+		var body struct {
+			Blacklist   []string `json:"blacklist"`
+			MaxDuration int      `json:"maxDuration"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to decode config: %v", err)})
 			return
 		}
-		if err := s.Config.Save(cfg); err != nil {
+		existing.Blacklist = body.Blacklist
+		existing.MaxDuration = body.MaxDuration
+		if err := s.Config.Save(existing); err != nil {
 			writeJSON(w, Envelope{ExitCode: 1, Message: fmt.Sprintf("failed to save config: %v", err)})
 			return
 		}

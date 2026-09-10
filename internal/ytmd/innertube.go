@@ -40,6 +40,15 @@ func lookupPlaylistViaInnertube(ctx context.Context, playlistID string) (Playlis
 	if !ok || len(lookup.Tracks) == 0 {
 		return PlaylistLookup{}, fmt.Errorf("innertube returned no tracks for playlist %q", playlistID)
 	}
+	if strings.EqualFold(strings.TrimSpace(lookup.Name), playlistID) {
+		if albumID := extractAlbumBrowseID(payload); albumID != "" {
+			if albumPayload, albumErr := postInnertubeBrowse(ctx, albumID); albumErr == nil {
+				if name := strings.TrimSpace(extractPlaylistName(albumPayload)); name != "" {
+					lookup.Name = name
+				}
+			}
+		}
+	}
 	return lookup, nil
 }
 
