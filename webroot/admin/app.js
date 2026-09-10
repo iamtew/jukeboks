@@ -524,16 +524,35 @@ function startPolling() {
 }
 
 function applyPositionFromWS(position) {
-  playbackState.position = Math.max(0, Number(position) || 0);
-  if (playbackState.hasSong) {
+  const next = Math.max(0, Number(position) || 0);
+  const advanced = next > playbackState.position;
+  playbackState.position = next;
+  // YTMD song.isPaused / PLAYER_INFO.isPlaying are often stale on connect.
+  // Advancing playback position is the reliable "actually playing" signal.
+  if (advanced && playbackState.hasSong && playbackState.isPaused) {
+    playbackState.isPaused = false;
+    updatePlaybackButtons();
+  } else if (playbackState.hasSong) {
     playState.textContent = playbackState.isPaused ? '⏸' : '▶';
   }
   currentTime.textContent = formatTime(playbackState.position);
   updateProgressBar();
 }
 
+function resolveIsPaused(...candidates) {
+  // Prefer isPlaying: YTMD song.isPaused is often stale while audio is actually playing.
+  for (const obj of candidates) {
+    if (obj && typeof obj.isPlaying === 'boolean') return !obj.isPlaying;
+  }
+  for (const obj of candidates) {
+    if (obj && typeof obj.isPaused === 'boolean') return obj.isPaused;
+  }
+  return null;
+}
+
 function applyPlayerStateFromWS(data) {
-  const isPaused = typeof data.isPlaying === 'boolean' ? !data.isPlaying : Boolean(data.isPaused);
+  const isPaused = resolveIsPaused(data);
+  if (isPaused === null) return;
   playbackState.isPaused = isPaused;
   if (playbackState.hasSong) {
     playState.textContent = isPaused ? '⏸' : '▶';
@@ -888,10 +907,13 @@ function setToggleButtonState(button, isOn) {
 }
 
 function updatePlaybackButtons() {
+  const isPlayingNow = playbackState.hasSong && !playbackState.isPaused;
   if (playerButtons.play && playerButtons.pause) {
-    playerButtons.play.classList.toggle('is-active', playbackState.hasSong && !playbackState.isPaused);
-    playerButtons.pause.classList.toggle('is-active', playbackState.hasSong && playbackState.isPaused);
+    // Highlight the action available: Pause while playing, Play while paused.
+    playerButtons.play.classList.toggle('is-active', playbackState.hasSong && playbackState.isPaused);
+    playerButtons.pause.classList.toggle('is-active', isPlayingNow);
   }
+  document.body.classList.toggle('is-playing', isPlayingNow);
   setToggleButtonState(playerButtons.shuffle, playbackState.shuffle);
 }
 
@@ -1030,12 +1052,17 @@ async function refreshQueueFromProxy() {
 function applyNowPlaying(payload) {
   const source = payload?.song ?? payload?.data?.song ?? payload?.data ?? payload;
   const song = source?.song ?? source;
-  const isPaused = typeof source?.isPaused === 'boolean'
-    ? source.isPaused
-    : typeof song?.isPaused === 'boolean'
-      ? song.isPaused
-      : (typeof song?.isPlaying === 'boolean' ? !song.isPlaying : false);
-  const position = Number(source?.position ?? song?.position ?? song?.currentTime ?? song?.progress ?? 0);
+  // Do not take play/pause from PLAYER_INFO / GET /song — isPaused is stale and
+  // PLAYER_INFO.isPlaying is derived from it. Use PLAYER_STATE_CHANGED + position ticks.
+  const position = Number(
+    payload?.position
+      ?? source?.position
+      ?? song?.elapsedSeconds
+      ?? song?.position
+      ?? song?.currentTime
+      ?? song?.progress
+      ?? 0,
+  );
   const duration = Number(source?.songDuration ?? song?.songDuration ?? song?.duration ?? song?.length ?? 0);
   const nextTitle = song?.title || song?.name || song?.track || source?.title || source?.name || '';
   const nextArtist = song?.artist || song?.artistName || song?.channel || song?.author || source?.artist || source?.artistName || '';
@@ -1047,9 +1074,8 @@ function applyNowPlaying(payload) {
     playbackState.shuffle = source.shuffle;
   }
 
-  if (nextTitle || nextArtist || duration || position || typeof source?.isPaused === 'boolean' || typeof song?.isPaused === 'boolean' || typeof song?.isPlaying === 'boolean') {
+  if (nextTitle || nextArtist || duration || position) {
     playbackState.hasSong = true;
-    playbackState.isPaused = isPaused;
     playbackState.position = position || playbackState.position;
     playbackState.duration = duration || playbackState.duration;
     playbackState.title = nextTitle || playbackState.title;
@@ -1090,9 +1116,11 @@ async function refreshNowPlayingFromProxy() {
 
     setCurrentMetaText('YTMD unavailable');
     updateCurrentMetaMarquee();
+    playbackState.isPaused = true;
     playState.textContent = '⏸';
     currentTime.textContent = '00:00';
     totalTime.textContent = '00:00';
+    updatePlaybackButtons();
   }
 }
 
@@ -1163,7 +1191,10 @@ async function sendPlayerCommand(path) {
   try {
     await fetch(path, { method: 'POST', headers: { Accept: 'application/json' } });
     window.setTimeout(() => {
-      refreshNowPlayingFromProxy();
+      // WS already owns play/pause; HTTP song.isPaused is stale and was wiping the glow.
+      if (!isNowPlayingSocketOpen()) {
+        refreshNowPlayingFromProxy();
+      }
       refreshQueueFromProxy();
       refreshShuffleFromProxy();
     }, 600);
