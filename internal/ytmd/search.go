@@ -106,20 +106,37 @@ func findBestSearchResult(payload any, query string) (queueEntrySummary, bool) {
 		return queueEntrySummary{}, false
 	}
 
-	bestIdx := -1
-	bestScore := -1
+	type candidate struct {
+		idx   int
+		score int
+	}
+	matched := make([]candidate, 0, len(entries))
+	hasDuration := false
 	for i, entry := range entries {
-		score, matched := queryRelevanceScore(query, entry.Title, entry.Artist)
-		if !matched {
+		score, ok := queryRelevanceScore(query, entry.Title, entry.Artist)
+		if !ok {
 			continue
 		}
-		if score > bestScore {
-			bestScore = score
-			bestIdx = i
+		matched = append(matched, candidate{idx: i, score: score})
+		if entry.DurationSeconds > 0 {
+			hasDuration = true
 		}
 	}
-	if bestIdx < 0 {
+	if len(matched) == 0 {
 		return queueEntrySummary{}, false
+	}
+
+	bestIdx := -1
+	bestScore := -1
+	for _, c := range matched {
+		// YTMD list rows often omit duration now; prefer a match we can policy-check.
+		if hasDuration && entries[c.idx].DurationSeconds <= 0 {
+			continue
+		}
+		if c.score > bestScore {
+			bestScore = c.score
+			bestIdx = c.idx
+		}
 	}
 	return entries[bestIdx], true
 }

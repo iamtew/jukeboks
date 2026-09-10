@@ -280,6 +280,64 @@ func TestFindBestSearchResultSkipsUnrelatedTopHit(t *testing.T) {
 	}
 }
 
+func TestFindBestSearchResultPrefersKnownDuration(t *testing.T) {
+	payload := map[string]any{
+		"contents": []any{
+			map[string]any{
+				"musicCardShelfRenderer": map[string]any{
+					"title": map[string]any{
+						"runs": []any{map[string]any{"text": "Trying To Find A Balance"}},
+					},
+					"subtitle": map[string]any{
+						"runs": []any{
+							map[string]any{"text": "Song"},
+							map[string]any{"text": " • "},
+							map[string]any{"text": "Atmosphere"},
+							map[string]any{"text": " • "},
+							map[string]any{"text": "4:18"},
+						},
+					},
+					"onTap": map[string]any{
+						"watchEndpoint": map[string]any{"videoId": "ttKzEo8KPjE"},
+					},
+				},
+			},
+			map[string]any{
+				"musicResponsiveListItemRenderer": map[string]any{
+					"videoId": "Et_E4M4JgIU",
+					"flexColumns": []any{
+						map[string]any{
+							"musicResponsiveListItemFlexColumnRenderer": map[string]any{
+								"text": map[string]any{
+									"runs": []any{map[string]any{"text": "Atmosphere - Trying to Find a Balance"}},
+								},
+							},
+						},
+						map[string]any{
+							"musicResponsiveListItemFlexColumnRenderer": map[string]any{
+								"text": map[string]any{
+									"runs": []any{map[string]any{"text": "Video • AspiringPsychopath"}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	entry, ok := findBestSearchResult(payload, "Atmosphere Trying To Find A Balance")
+	if !ok {
+		t.Fatal("findBestSearchResult() ok = false, want true")
+	}
+	if entry.VideoID != "ttKzEo8KPjE" {
+		t.Fatalf("videoId = %q, want ttKzEo8KPjE (duration-known shelf hit)", entry.VideoID)
+	}
+	if entry.DurationSeconds != 258 {
+		t.Fatalf("duration = %d, want 258", entry.DurationSeconds)
+	}
+}
+
 func TestFindBestSearchResultRejectsNoMatch(t *testing.T) {
 	payload := map[string]any{
 		"contents": []any{

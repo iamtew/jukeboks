@@ -165,13 +165,19 @@ button {
 
 .player-toggles {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   gap: 6px;
   margin-bottom: 8px;
   width: 100%;
 }
 
+.player-toggles__form {
+  display: flex;
+  min-width: 0;
+}
+
 .player-toggles__input {
+  flex: 1;
   min-width: 0;
   padding: var(--control-padding-y) 8px;
   font-size: var(--control-font-size);
@@ -605,7 +611,7 @@ pre {
   }
 
   .player-toggles {
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto 1fr;
     gap: 4px;
   }
 

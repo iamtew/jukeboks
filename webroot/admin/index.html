@@ -38,7 +38,9 @@
       </section>
       <section class="player-toggles" aria-label="Playback modes">
         <button id="shuffleButton" class="control-btn" type="button" aria-label="Shuffle" aria-pressed="false">Shuffle</button>
-        <input id="songRequestInput" class="player-toggles__input" type="search" placeholder="Request song…" aria-label="Song request" autocomplete="off" />
+        <form id="songRequestForm" class="player-toggles__form" action="#">
+          <input id="songRequestInput" class="player-toggles__input" type="search" placeholder="Request song…" aria-label="Song request" autocomplete="off" />
+        </form>
       </section>
 
       <nav class="tabs" aria-label="Admin sections">

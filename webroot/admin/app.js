@@ -55,6 +55,7 @@ const playerButtons = {
   shuffle: document.getElementById('shuffleButton'),
 };
 const songRequestInput = document.getElementById('songRequestInput');
+const songRequestForm = document.getElementById('songRequestForm');
 const seedStatusLine = document.getElementById('seedStatusLine');
 const seedPlaylistInput = document.getElementById('seedPlaylistInput');
 const addSeedPlaylistButton = document.getElementById('addSeedPlaylistButton');
@@ -590,10 +591,11 @@ function setQueueActionFeedback(message, kind = 'success') {
   if (queueActionFeedbackTimer) {
     window.clearTimeout(queueActionFeedbackTimer);
   }
+  const ttl = kind === 'error' ? 4000 : 1400;
   queueActionFeedbackTimer = window.setTimeout(() => {
     queueActionFeedback = null;
     renderQueue();
-  }, 1400);
+  }, ttl);
 }
 
 function resetQueueActionButtonState(button, action) {
@@ -1175,10 +1177,10 @@ async function submitSongRequest() {
     );
     const payload = await readCommandEnvelope(response);
     songRequestInput.value = '';
-    songRequestInput.title = payload.message || 'Added to queue';
+    setQueueActionFeedback(payload.message || 'Added to queue', 'success');
     refreshQueueFromProxy();
   } catch (err) {
-    songRequestInput.title = err.message;
+    setQueueActionFeedback(err.message || 'Song request failed', 'error');
   }
 }
 
@@ -1259,7 +1261,14 @@ Object.entries(playerButtons).forEach(([key, button]) => {
   });
 });
 
+if (songRequestForm) {
+  songRequestForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitSongRequest();
+  });
+}
 if (songRequestInput) {
+  // keydown covers tools/browsers that don't synthesize form submit from Enter
   songRequestInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
       event.preventDefault();
