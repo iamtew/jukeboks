@@ -69,8 +69,8 @@
     }
 
     ui.songInfo.style.background = `linear-gradient(135deg,
-      rgba(14, 34, 62, 0.45),
-      rgba(48, 92, 144, 0.22))`;
+      rgba(14, 34, 62, 0.66),
+      rgba(48, 92, 144, 0.33))`;
     ui.songInfo.style.borderColor = "rgba(170, 220, 255, 0.28)";
     ui.songInfo.style.boxShadow =
       "inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 10px 30px rgba(0, 0, 0, 0.28)";
