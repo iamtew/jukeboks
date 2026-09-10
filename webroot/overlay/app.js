@@ -1,7 +1,6 @@
 (function () {
   const output = document.getElementById("output");
 
-  // Group UI elements by responsibility so the rest of the file stays readable.
   const ui = {
     songInfo: document.getElementById("songInfo"),
     artist: document.getElementById("artist"),
@@ -18,22 +17,23 @@
     fill: document.getElementById("fill"),
   };
 
-  // Runtime state for the overlay.
   const state = {
     songDuration: 0,
     position: 0,
     pauseFadeTimer: null,
-    isPlaybackActive: false,
+    progressStallTimer: null,
+    isPaused: true,
+    fadeGeneration: 0,
   };
 
-  // Timing constants for fade and marquee behavior.
   const timings = {
     fadeOutDelay: 180,
     fadeOutDuration: 600,
     fadeInDuration: 180,
   };
+  // YTMD position ticks are often ~1s; keep headroom so we don't false-pause between ticks.
+  const PROGRESS_STALL_MS = 1800;
 
-  // Enable dev mode if ?dev=true and allow host/port overrides via query params.
   const params = new URLSearchParams(window.location.search);
   const devMode = params.get("dev") === "true";
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -42,34 +42,182 @@
   const pulseParam = params.get("pulse");
   const pulseSpeed = pulseParam === null ? 3 : Math.max(0, Math.min(10, Number(pulseParam) || 0));
   const bgParam = params.get("bg");
-  const bgOpacityLevel = bgParam === null ? 0 : Math.max(0, Math.min(6, Number(bgParam) || 0));
+  // Default glass on; ?bg=0 / false for text-only.
+  const useGlass = !(bgParam === "0" || bgParam === "false");
   const WS_URL = `${protocol}://${host}:${port}/api/v1/ws`;
 
   if (devMode) {
+    document.documentElement.classList.add("dev");
     document.body.classList.add("dev");
-    output.style.display = "block";
-  } else {
+    if (output) output.style.display = "block";
+  } else if (output) {
     output.style.display = "none";
   }
 
-  function applyBackgroundOpacity() {
+  // Glass = translucent fill (alpha). That is what shows checkerboard/OBS through.
+  // Do not use backdrop-filter here: when it can't sample, Chromium paints an opaque slab.
+  function applyGlass() {
     if (!ui.songInfo) return;
 
-    const normalizedOpacity = bgOpacityLevel === 0 ? 0 : 0.08 + (bgOpacityLevel / 6) * 0.42;
+    if (!useGlass) {
+      ui.songInfo.style.background = "transparent";
+      ui.songInfo.style.borderColor = "transparent";
+      ui.songInfo.style.boxShadow = "none";
+      ui.songInfo.style.backdropFilter = "none";
+      ui.songInfo.style.webkitBackdropFilter = "none";
+      return;
+    }
+
     ui.songInfo.style.background = `linear-gradient(135deg,
-      rgba(14, 34, 62, ${normalizedOpacity}),
-      rgba(48, 92, 144, ${Math.min(0.5, normalizedOpacity * 0.8)}))`;
-    ui.songInfo.style.borderColor = normalizedOpacity > 0 ? "rgba(170, 220, 255, 0.22)" : "rgba(170, 220, 255, 0)";
-    ui.songInfo.style.boxShadow = normalizedOpacity > 0
-      ? "inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 10px 30px rgba(0, 0, 0, 0.25)"
-      : "none";
+      rgba(14, 34, 62, 0.45),
+      rgba(48, 92, 144, 0.22))`;
+    ui.songInfo.style.borderColor = "rgba(170, 220, 255, 0.28)";
+    ui.songInfo.style.boxShadow =
+      "inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 10px 30px rgba(0, 0, 0, 0.28)";
+    ui.songInfo.style.backdropFilter = "none";
+    ui.songInfo.style.webkitBackdropFilter = "none";
   }
 
-  applyBackgroundOpacity();
+  applyGlass();
+
+  function setSongInfoOpacity(opacity, duration) {
+    if (!ui.songInfo) return;
+    ui.songInfo.style.transition = `opacity ${duration}ms ease`;
+    ui.songInfo.style.opacity = String(opacity);
+  }
+
+  function resetPauseFade() {
+    if (state.pauseFadeTimer) {
+      clearTimeout(state.pauseFadeTimer);
+      state.pauseFadeTimer = null;
+    }
+  }
+
+  function startGlowPulse() {
+    if (!ui.songInfo) return;
+    if (pulseSpeed <= 0) {
+      ui.songInfo.classList.remove("is-glowing");
+      return;
+    }
+    const speedScale = Math.max(0.1, pulseSpeed / 5);
+    ui.songInfo.style.setProperty("--glow-duration", `${(2 / speedScale).toFixed(2)}s`);
+    ui.songInfo.classList.add("is-glowing");
+  }
+
+  function stopGlowPulse() {
+    ui.songInfo?.classList.remove("is-glowing");
+  }
+
+  // Paused → fade. Playing → full opacity.
+  function handlePlaybackState(isPaused) {
+    const next = Boolean(isPaused);
+    if (state.isPaused === next) {
+      if (ui.playState) ui.playState.textContent = next ? "⏸" : "⏵";
+      return;
+    }
+    state.isPaused = next;
+    if (ui.playState) ui.playState.textContent = next ? "⏸" : "⏵";
+    resetPauseFade();
+    state.fadeGeneration += 1;
+    const generation = state.fadeGeneration;
+
+    if (next) {
+      state.pauseFadeTimer = window.setTimeout(() => {
+        if (generation !== state.fadeGeneration) return;
+        setSongInfoOpacity(0.25, timings.fadeOutDuration);
+        stopGlowPulse();
+      }, timings.fadeOutDelay);
+      return;
+    }
+
+    setSongInfoOpacity(1, timings.fadeInDuration);
+    startGlowPulse();
+  }
+
+  // YTMD sends POSITION_CHANGED while playing and stops when paused — that is the truth signal.
+  function notePlaybackProgress() {
+    window.clearTimeout(state.progressStallTimer);
+    state.progressStallTimer = window.setTimeout(() => {
+      if (state.isPaused) return;
+      handlePlaybackState(true);
+    }, PROGRESS_STALL_MS);
+  }
+
+  function formatTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  function updateMarker() {
+    if (state.songDuration <= 0 || !ui.bar || !ui.marker || !ui.fill) return;
+    const barWidth = ui.bar.clientWidth;
+    const pct = state.position / state.songDuration;
+    const x = Math.min(barWidth - 6, Math.max(0, barWidth * pct));
+    const fillWidth = Math.max(0, Math.min(barWidth, barWidth * pct));
+    ui.marker.style.transform = `translateX(${x}px)`;
+    ui.fill.style.width = `${fillWidth}px`;
+  }
+
+  function updateRemainingTime() {
+    if (!ui.totalTime) return;
+    ui.totalTime.textContent = formatTime(Math.max(0, state.songDuration - state.position));
+  }
+
+  function updateOutput(data) {
+    if (!devMode || !output) return;
+    output.textContent = JSON.stringify(data, null, 2);
+  }
+
+  function log(obj) {
+    if (!devMode || !output) return;
+    output.textContent = JSON.stringify(obj, null, 2);
+  }
+
+  function getMarqueeTrack(textEl) {
+    if (!textEl) return null;
+    let track = textEl.querySelector(".overlay-marquee-track");
+    if (track) return track;
+    track = document.createElement("span");
+    track.className = "overlay-marquee-track";
+    track.textContent = textEl.textContent || "";
+    textEl.textContent = "";
+    textEl.appendChild(track);
+    return track;
+  }
+
+  function setMarqueeText(textEl, value) {
+    const track = getMarqueeTrack(textEl);
+    if (!track) return false;
+    const nextValue = String(value || "");
+    if (track.textContent === nextValue) return false;
+    track.textContent = nextValue;
+    return true;
+  }
+
+  function updateTextMarquee(textEl, wrapEl) {
+    if (!textEl || !wrapEl) return;
+    const track = getMarqueeTrack(textEl);
+    if (!track) return;
+    textEl.classList.remove("is-marquee");
+    textEl.style.removeProperty("--marquee-distance");
+    window.requestAnimationFrame(() => {
+      const overflowWidth = track.scrollWidth - wrapEl.clientWidth;
+      if (overflowWidth > 4) {
+        textEl.style.setProperty("--marquee-distance", `${overflowWidth}px`);
+        textEl.classList.add("is-marquee");
+      }
+    });
+  }
+
+  function setOverlayField(textEl, wrapEl, value) {
+    if (setMarqueeText(textEl, value)) {
+      updateTextMarquee(textEl, wrapEl);
+    }
+  }
 
   let ws;
 
-  // Connect to the WebSocket feed and handle the incoming player updates.
   function connect() {
     ws = new WebSocket(WS_URL);
 
@@ -91,28 +239,48 @@
               state.songDuration = data.song.songDuration;
             }
 
+            if (typeof data.position === "number") {
+              state.position = data.position;
+            } else if (typeof data.song.elapsedSeconds === "number") {
+              state.position = data.song.elapsedSeconds;
+            }
+            ui.currentTime.textContent = formatTime(state.position);
+            updateMarker();
             updateRemainingTime();
-
-            ui.playState.textContent = data.song.isPaused ? "⏸" : "⏵";
-            handlePlaybackState(Boolean(data.song.isPaused));
+            // Do not take play/pause from PLAYER_INFO — song.isPaused / isPlaying are stale.
+            // POSITION_CHANGED stall + PLAYER_STATE_CHANGED are the truth.
           }
-
           updateOutput(data);
         }
 
         if (data.type === "POSITION_CHANGED") {
-          state.position = data.position || 0;
+          const next = Math.max(0, Number(data.position) || 0);
+          const advanced = next > state.position + 0.05;
+          state.position = next;
           ui.currentTime.textContent = formatTime(state.position);
           updateRemainingTime();
           updateMarker();
+          if (advanced) {
+            handlePlaybackState(false);
+            notePlaybackProgress();
+          }
         }
 
         if (data.type === "PLAYER_STATE_CHANGED") {
           const isPaused = typeof data.isPlaying === "boolean" ? !data.isPlaying : Boolean(data.isPaused);
-          ui.playState.textContent = isPaused ? "⏸" : "⏵";
           handlePlaybackState(isPaused);
+          if (isPaused) {
+            window.clearTimeout(state.progressStallTimer);
+          } else {
+            notePlaybackProgress();
+          }
+          if (data.position != null) {
+            state.position = Math.max(0, Number(data.position) || 0);
+            ui.currentTime.textContent = formatTime(state.position);
+            updateRemainingTime();
+            updateMarker();
+          }
         }
-
       } catch (err) {
         log({ error: "Failed to parse message", raw: msg.data });
       }
@@ -128,147 +296,6 @@
     };
   }
 
-  // Update the progress bar and marker position from the latest position event.
-  function updateMarker() {
-    if (state.songDuration <= 0) return;
-
-    const barWidth = ui.bar.clientWidth;
-    const pct = state.position / state.songDuration;
-    const x = Math.min(barWidth - 6, Math.max(0, barWidth * pct));
-    const fillWidth = Math.max(0, Math.min(barWidth, barWidth * pct));
-
-    ui.marker.style.transform = `translateX(${x}px)`;
-    ui.fill.style.width = `${fillWidth}px`;
-  }
-
-  function updateRemainingTime() {
-    if (!ui.totalTime) return;
-
-    const remaining = Math.max(0, state.songDuration - state.position);
-    ui.totalTime.textContent = formatTime(remaining);
-  }
-
-  // Chromatic glow is a CSS keyframe; JS only toggles the class and duration.
-  function startGlowPulse() {
-    if (!ui.songInfo) return;
-    if (pulseSpeed <= 0) {
-      stopGlowPulse();
-      return;
-    }
-    const speedScale = Math.max(0.1, pulseSpeed / 5);
-    ui.songInfo.style.setProperty("--glow-duration", `${(2 / speedScale).toFixed(2)}s`);
-    ui.songInfo.classList.add("is-glowing");
-    state.isPlaybackActive = true;
-  }
-
-  function stopGlowPulse() {
-    state.isPlaybackActive = false;
-    ui.songInfo?.classList.remove("is-glowing");
-  }
-
-  function formatTime(sec) {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-
-  function updateOutput(data) {
-    if (!devMode) return;
-    output.textContent = JSON.stringify(data, null, 2);
-  }
-
-  function getMarqueeTrack(textEl) {
-    if (!textEl) return null;
-
-    let track = textEl.querySelector('.overlay-marquee-track');
-    if (track) {
-      return track;
-    }
-
-    track = document.createElement('span');
-    track.className = 'overlay-marquee-track';
-    track.textContent = textEl.textContent || '';
-    textEl.textContent = '';
-    textEl.appendChild(track);
-    return track;
-  }
-
-  function setMarqueeText(textEl, value) {
-    const track = getMarqueeTrack(textEl);
-    if (!track) return false;
-
-    const nextValue = String(value || '');
-    if (track.textContent === nextValue) {
-      return false;
-    }
-
-    track.textContent = nextValue;
-    return true;
-  }
-
-  function updateTextMarquee(textEl, wrapEl) {
-    if (!textEl || !wrapEl) return;
-
-    const track = getMarqueeTrack(textEl);
-    if (!track) return;
-
-    textEl.classList.remove('is-marquee');
-    textEl.style.removeProperty('--marquee-distance');
-
-    window.requestAnimationFrame(() => {
-      const wrapWidth = wrapEl.clientWidth;
-      const textWidth = track.scrollWidth;
-      const overflowWidth = textWidth - wrapWidth;
-
-      if (overflowWidth > 4) {
-        textEl.style.setProperty('--marquee-distance', `${overflowWidth}px`);
-        textEl.classList.add('is-marquee');
-      }
-    });
-  }
-
-  function setOverlayField(textEl, wrapEl, value) {
-    const changed = setMarqueeText(textEl, value);
-    if (changed) {
-      updateTextMarquee(textEl, wrapEl);
-    }
-  }
-
-  function log(obj) {
-    if (!devMode) return;
-    output.textContent = JSON.stringify(obj, null, 2);
-  }
-
-  function setSongInfoOpacity(opacity, duration) {
-    if (!ui.songInfo) return;
-    ui.songInfo.style.transition = `opacity ${duration}ms ease`;
-    ui.songInfo.style.opacity = String(opacity);
-  }
-
-  function resetPauseFade() {
-    if (state.pauseFadeTimer) {
-      clearTimeout(state.pauseFadeTimer);
-      state.pauseFadeTimer = null;
-    }
-  }
-
-  // Pause handling: dim the overlay after a short delay and stop the glow while faint.
-  function handlePlaybackState(isPaused) {
-    resetPauseFade();
-
-    if (isPaused) {
-      state.pauseFadeTimer = window.setTimeout(() => {
-        setSongInfoOpacity(0.25, timings.fadeOutDuration);
-        stopGlowPulse();
-      }, timings.fadeOutDelay);
-      return;
-    }
-
-    setSongInfoOpacity(1, timings.fadeInDuration);
-    startGlowPulse();
-  }
-
-  // Measure marquee overflow once the layout is ready.
   window.requestAnimationFrame(() => {
     updateTextMarquee(ui.title, ui.titleWrap);
     updateTextMarquee(ui.artist, ui.artistWrap);
@@ -280,6 +307,11 @@
     updateTextMarquee(ui.artist, ui.artistWrap);
     updateTextMarquee(ui.album, ui.albumWrap);
   });
+
+  // Assume paused until position advances (matches admin; avoids stale isPaused).
+  if (ui.playState) ui.playState.textContent = "⏸";
+  setSongInfoOpacity(0.25, 0);
+  stopGlowPulse();
 
   connect();
 })();

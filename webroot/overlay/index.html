@@ -5,46 +5,55 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Now Playing Overlay</title>
-    <link rel="stylesheet" href="style.css?v=20260810" />
+    <script>
+      // Enable checkerboard before CSS paint when ?dev=true
+      if (new URLSearchParams(location.search).get("dev") === "true") {
+        document.documentElement.classList.add("dev");
+      }
+    </script>
+    <link rel="stylesheet" href="style.css?v=20260910o" />
 </head>
 
 <body>
 
-<!-- Main overlay panel that shows the current song metadata and playback progress. -->
-<div id="songInfo">
+<div class="overlay-stage">
+    <!-- Painted under the glass so fill alpha shows the board (no backdrop-filter). -->
+    <div class="dev-checkerboard" aria-hidden="true"></div>
 
-    <div id="infoRow">
-        <div id="playState">⏸</div>
+    <div id="songInfo">
 
-        <div id="textBlock">
-            <div id="artistWrap">
-                <div id="artist"><span class="overlay-marquee-track">Artist</span></div>
-            </div>
+        <div id="infoRow">
+            <div id="playState">⏸</div>
 
-            <!-- The title is animated here as a marquee when it overflows the visible area. -->
-            <div id="titleWrap">
-                <div id="title"><span class="overlay-marquee-track">Title</span></div>
-            </div>
-            <div id="albumWrap">
-                <div id="album"><span class="overlay-marquee-track">Album</span></div>
+            <div id="textBlock">
+                <div id="artistWrap">
+                    <div id="artist"><span class="overlay-marquee-track">Artist</span></div>
+                </div>
+
+                <div id="titleWrap">
+                    <div id="title"><span class="overlay-marquee-track">Title</span></div>
+                </div>
+                <div id="albumWrap">
+                    <div id="album"><span class="overlay-marquee-track">Album</span></div>
+                </div>
             </div>
         </div>
-    </div>
 
-    <div id="progress">
-        <span id="currentTime">00:00</span>
-        <div id="bar">
-            <div id="fill"></div>
-            <div id="marker"></div>
+        <div id="progress">
+            <span id="currentTime">00:00</span>
+            <div id="bar">
+                <div id="fill"></div>
+                <div id="marker"></div>
+            </div>
+            <span id="totalTime">00:00</span>
         </div>
-        <span id="totalTime">00:00</span>
+
     </div>
 
+    <pre id="output" style="display:none;">Waiting for events...</pre>
 </div>
 
-<pre id="output" style="display:none;">Waiting for events...</pre>
-
-<script src="app.js?v=20260810"></script>
+<script src="app.js?v=20260910o"></script>
 </body>
 
 </html>

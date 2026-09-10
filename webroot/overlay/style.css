@@ -10,21 +10,61 @@ body {
     overflow: hidden;
     font-family: 'Better VCR', sans-serif;
     color: #eee;
+    height: 100%;
 }
 
-/* Dev mode uses a visible background so the overlay can be previewed easily. */
+html.dev,
 body.dev {
-    background: #111;
+    overflow: auto;
+    background: #1a1a1a;
 }
 
-/* JSON output used when the overlay is opened in development mode. */
+html.dev body,
+body.dev {
+    background: #1a1a1a;
+}
+
+.overlay-stage {
+    position: relative;
+    min-height: 100vh;
+    width: 100%;
+}
+
+/*
+  Checkerboard is a normal painted layer under #songInfo.
+  Glass transparency is fill alpha (not backdrop-filter) so the board
+  always shows through in the browser — same alpha OBS uses over the scene.
+*/
+.dev-checkerboard {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-color: #1a1a1a;
+    background-image:
+        linear-gradient(45deg, #333 25%, transparent 25%),
+        linear-gradient(-45deg, #333 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #333 75%),
+        linear-gradient(-45deg, transparent 75%, #333 75%);
+    background-size: 32px 32px;
+    background-position: 0 0, 0 16px, 16px -16px, -16px 0;
+}
+
+html.dev .dev-checkerboard,
+body.dev .dev-checkerboard {
+    display: block;
+}
+
 #output {
+    position: relative;
+    z-index: 1;
     white-space: pre-wrap;
     font-size: 10pt;
     padding: 20px;
 }
 
-/* Song info block */
+/* LCD glass: translucent fill. Tune these alphas to change see-through amount. */
 #songInfo {
     display: flex;
     flex-direction: column;
@@ -34,18 +74,17 @@ body.dev {
     color: #e0fefe;
     width: 500px;
     position: relative;
+    z-index: 1;
     opacity: 1;
     transition: opacity 180ms ease;
     background: linear-gradient(135deg,
-        rgba(14, 34, 62, 0.55),
-        rgba(48, 92, 144, 0.28));
-    border: 1px solid rgba(170, 220, 255, 0.22);
+        rgba(14, 34, 62, 0.45),
+        rgba(48, 92, 144, 0.22));
+    border: 1px solid rgba(170, 220, 255, 0.28);
     border-radius: 16px;
     box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.18),
-        0 10px 30px rgba(0, 0, 0, 0.25);
-    backdrop-filter: blur(12px) saturate(120%);
-    -webkit-backdrop-filter: blur(12px) saturate(120%);
+        inset 0 1px 0 rgba(255, 255, 255, 0.2),
+        0 10px 30px rgba(0, 0, 0, 0.28);
     text-shadow: none;
 }
 
@@ -69,7 +108,6 @@ body.dev {
     }
 }
 
-/* Two-column layout for the play state and track text. */
 #infoRow {
     display: flex;
     align-items: flex-start;
@@ -78,49 +116,54 @@ body.dev {
 }
 
 #playState {
-    font-size: 3.3em;
-    opacity: 0.85;
-    min-width: 60px;
+    flex: 0 0 auto;
+    font-size: 1.4em;
+    line-height: 1;
+    min-width: 1.2em;
+    text-align: center;
+    opacity: 0.95;
 }
 
 #textBlock {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    line-height: 1.2;
-    flex: 1 1 auto;
-    min-width: 0;
+    gap: 2px;
 }
 
-/* Artist, title, and album marquee containers. */
 #artistWrap,
 #titleWrap,
 #albumWrap {
-    width: 100%;
-    max-width: 100%;
-    display: block;
     overflow: hidden;
-    position: relative;
-    height: 1.35em;
+    width: 100%;
 }
 
-/* Artist, title, and album text that moves left when it overflows the visible area. */
 #artist,
 #title,
 #album {
-    font-size: 1em;
-    opacity: 0.9;
-    display: block;
-    width: 100%;
-    min-width: 0;
+    white-space: nowrap;
     overflow: hidden;
+}
+
+#artist {
+    font-size: 0.85em;
+    opacity: 0.85;
+}
+
+#title {
+    font-size: 1.05em;
+    font-weight: bold;
+}
+
+#album {
+    font-size: 0.8em;
+    opacity: 0.75;
 }
 
 .overlay-marquee-track {
     display: inline-block;
     min-width: 100%;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    vertical-align: top;
 }
 
 #artist.is-marquee .overlay-marquee-track,
@@ -129,22 +172,7 @@ body.dev {
     width: max-content;
     min-width: 100%;
     padding-right: 24px;
-    text-overflow: clip;
     animation: overlay-marquee 8s ease-in-out infinite alternate;
-    will-change: transform;
-}
-
-/* Artist name styling. */
-#artist {
-    font-weight: bold;
-    font-size: 1.1em;
-    letter-spacing: 0.5px;
-}
-
-/* Album styling. */
-#album {
-    font-size: 0.95em;
-    opacity: 0.85;
 }
 
 @keyframes overlay-marquee {
@@ -152,13 +180,20 @@ body.dev {
     100% { transform: translateX(calc(-1 * var(--marquee-distance, 0px))); }
 }
 
-/* Progress bar */
+/* Progress bar — original yellow/red indicator gradient. */
 #progress {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 10px 0;
     font-size: 1em;
+}
+
+#currentTime,
+#totalTime {
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+    min-width: 3.2em;
 }
 
 #bar {
@@ -192,7 +227,6 @@ body.dev {
     width: 6px;
     height: 24px;
     background: #eee;
-    /* border-radius: 50%; */
     transform: translateX(0);
     z-index: 2;
 }

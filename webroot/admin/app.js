@@ -479,9 +479,12 @@ let queueDragFromIndex = null;
 let queueMoveInFlight = false;
 let queueRefreshDebounceTimer = null;
 let pollTimer = null;
+let progressStallTimer = null;
 
 const POLL_INTERVAL_WS_MS = 5000; // queue has no WS event; song switches already refresh sooner
 const POLL_INTERVAL_NO_WS_MS = 10000;
+// YTMD position ticks are often ~1s; keep headroom so we don't false-pause between ticks.
+const PROGRESS_STALL_MS = 1800;
 
 function isNowPlayingSocketOpen() {
   return window.__jukeboksSocket?.readyState === WebSocket.OPEN;
@@ -523,15 +526,38 @@ function startPolling() {
   }, intervalMs);
 }
 
+function setAdminPaused(isPaused) {
+  const next = Boolean(isPaused);
+  if (playbackState.isPaused === next) {
+    if (playbackState.hasSong) {
+      playState.textContent = next ? '⏸' : '▶';
+    }
+    updatePlaybackButtons();
+    return;
+  }
+  playbackState.isPaused = next;
+  if (playbackState.hasSong) {
+    playState.textContent = next ? '⏸' : '▶';
+  }
+  updatePlaybackButtons();
+}
+
+// YTMD keeps sending POSITION_CHANGED while playing and stops when paused.
+function notePlaybackProgress() {
+  window.clearTimeout(progressStallTimer);
+  progressStallTimer = window.setTimeout(() => {
+    if (!playbackState.hasSong || playbackState.isPaused) return;
+    setAdminPaused(true);
+  }, PROGRESS_STALL_MS);
+}
+
 function applyPositionFromWS(position) {
   const next = Math.max(0, Number(position) || 0);
-  const advanced = next > playbackState.position;
+  const advanced = next > playbackState.position + 0.05;
   playbackState.position = next;
-  // YTMD song.isPaused / PLAYER_INFO.isPlaying are often stale on connect.
-  // Advancing playback position is the reliable "actually playing" signal.
-  if (advanced && playbackState.hasSong && playbackState.isPaused) {
-    playbackState.isPaused = false;
-    updatePlaybackButtons();
+  if (advanced && playbackState.hasSong) {
+    setAdminPaused(false);
+    notePlaybackProgress();
   } else if (playbackState.hasSong) {
     playState.textContent = playbackState.isPaused ? '⏸' : '▶';
   }
@@ -540,7 +566,6 @@ function applyPositionFromWS(position) {
 }
 
 function resolveIsPaused(...candidates) {
-  // Prefer isPlaying: YTMD song.isPaused is often stale while audio is actually playing.
   for (const obj of candidates) {
     if (obj && typeof obj.isPlaying === 'boolean') return !obj.isPlaying;
   }
@@ -553,11 +578,17 @@ function resolveIsPaused(...candidates) {
 function applyPlayerStateFromWS(data) {
   const isPaused = resolveIsPaused(data);
   if (isPaused === null) return;
-  playbackState.isPaused = isPaused;
-  if (playbackState.hasSong) {
-    playState.textContent = isPaused ? '⏸' : '▶';
+  setAdminPaused(isPaused);
+  if (!isPaused) {
+    notePlaybackProgress();
+  } else {
+    window.clearTimeout(progressStallTimer);
   }
-  updatePlaybackButtons();
+  if (data.position != null) {
+    playbackState.position = Math.max(0, Number(data.position) || 0);
+    currentTime.textContent = formatTime(playbackState.position);
+    updateProgressBar();
+  }
 }
 
 async function readCommandEnvelope(response) {
@@ -1027,6 +1058,11 @@ async function refreshQueueFromProxy() {
     const items = Array.isArray(payload?.data?.items) ? payload.data.items : [];
 
     if (status === 'unavailable') {
+      // Keep last good queue on transient YTMD blips; retry once.
+      if (playbackState.queue?.length && playbackState.queueStatus === 'ok') {
+        scheduleQueueRefreshFromWS(1200);
+        return;
+      }
       playbackState.queue = [];
       playbackState.queueStatus = 'unavailable';
       renderQueue();
@@ -1041,6 +1077,10 @@ async function refreshQueueFromProxy() {
       if (queueDragActive || queueMoveInFlight) {
         scheduleQueueRefreshFromWS(400);
       }
+      return;
+    }
+    if (playbackState.queue?.length && playbackState.queueStatus === 'ok') {
+      scheduleQueueRefreshFromWS(1200);
       return;
     }
     playbackState.queue = [];
@@ -1272,13 +1312,11 @@ Object.entries(playerButtons).forEach(([key, button]) => {
 
   button.addEventListener('click', async () => {
     if (key === 'play') {
-      playbackState.isPaused = false;
-      updatePlaybackButtons();
-      playState.textContent = '▶';
+      setAdminPaused(false);
+      notePlaybackProgress();
     } else if (key === 'pause') {
-      playbackState.isPaused = true;
-      updatePlaybackButtons();
-      playState.textContent = '⏸';
+      window.clearTimeout(progressStallTimer);
+      setAdminPaused(true);
     } else if (key === 'shuffle') {
       playbackState.shuffle = !playbackState.shuffle;
       updatePlaybackButtons();
