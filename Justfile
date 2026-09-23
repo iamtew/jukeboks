@@ -7,15 +7,21 @@ output_dir := "dist"
 default:
     just --list
 
+ldflags := "-H=windowsgui"
+
+icon:
+    magick webroot/img/jukeboks.png -background none -define icon:auto-resize=256,48,32,16 cmd/jukeboks/jukeboks.ico
+    go run github.com/akavel/rsrc@v0.10.2 -arch amd64 -ico cmd/jukeboks/jukeboks.ico -o cmd/jukeboks/rsrc_windows.syso
+
 build:
-    go build -o {{binary}} ./cmd/jukeboks
+    go build -ldflags="{{ldflags}}" -o {{binary}} ./cmd/jukeboks
 
 clean:
     if (Test-Path {{binary}}) { Remove-Item {{binary}} -Force }
     if (Test-Path {{output_dir}}) { Remove-Item {{output_dir}} -Recurse -Force }
 
 run:
-    go run ./cmd/jukeboks
+    go run -ldflags="{{ldflags}}" ./cmd/jukeboks
 
 test:
     go test ./...
@@ -23,7 +29,7 @@ test:
 package:
     if (Test-Path {{output_dir}}) { Remove-Item {{output_dir}} -Recurse -Force }
     New-Item -ItemType Directory -Path {{output_dir}} -Force | Out-Null
-    go build -o {{output_dir}}/{{binary}} ./cmd/jukeboks
+    go build -ldflags="{{ldflags}}" -o {{output_dir}}/{{binary}} ./cmd/jukeboks
     if (-not (Test-Path {{output_dir}}/{{binary}})) { Write-Error "go build failed"; exit 1 }
     Copy-Item -Path webroot -Destination {{output_dir}}/webroot -Recurse -Force
 

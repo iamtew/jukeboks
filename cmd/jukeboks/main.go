@@ -10,17 +10,27 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
+	"sync"
 	"time"
 
 	"jukeboks/internal/config"
 	"jukeboks/internal/httplog"
 	"jukeboks/internal/server"
 	"jukeboks/internal/ytmd"
+)
+
+var (
+	httpMu        sync.Mutex
+	httpServer    *http.Server
+	httpDone      chan error
+	httpHandler   http.Handler
+	preferredPort string
+	actualPort    string
+	webrootPath   string
+	configPathStr string
 )
 
 func main() {
@@ -31,52 +41,107 @@ func main() {
 	configFlag := flag.String("config", "", "path to jukeboks.json")
 	noColor := flag.Bool("no-color", false, "disable colored HTTP log output")
 	flag.Parse()
+	attachParentConsole()
+	httplog.Out = os.Stderr
+	log.SetOutput(os.Stderr)
 
 	if *noColor {
 		httplog.UseColor = false
 	}
 	httplog.InitColor()
 
-	webroot := resolvePath(*webrootFlag, "webroot")
-	configPath := resolvePath(*configFlag, "jukeboks.json")
+	webrootPath = resolvePath(*webrootFlag, "webroot")
+	configPathStr = resolvePath(*configFlag, "jukeboks.json")
 
-	if info, err := os.Stat(webroot); err != nil || !info.IsDir() {
-		log.Fatalf("webroot not found at %s", webroot)
+	if info, err := os.Stat(webrootPath); err != nil || !info.IsDir() {
+		fatalf("webroot not found at %s", webrootPath)
 	}
 
-	store, err := config.NewStore(configPath)
+	store, err := config.NewStore(configPathStr)
 	if err != nil {
-		log.Fatalf("failed to initialize config: %v", err)
+		fatalf("failed to initialize config: %v", err)
 	}
+	configPathStr = store.Path()
 
 	target := &url.URL{Scheme: "http", Host: net.JoinHostPort(*ytmdHost, *ytmdPort)}
 	client := ytmd.NewClient(target)
-	srv := server.New(store, client, webroot)
+	httpHandler = server.New(store, client, webrootPath).Handler()
+	preferredPort = *port
 
-	listener, actualPort, err := listenWithFallback(*port)
-	if err != nil {
-		log.Fatalf("failed to start server: %v", err)
+	if err := startHTTP(); err != nil {
+		fatalf("failed to start server: %v", err)
+	}
+	waitForQuit()
+}
+
+func startHTTP() error {
+	httpMu.Lock()
+	defer httpMu.Unlock()
+	if httpServer != nil {
+		return nil
 	}
 
-	httpServer := &http.Server{Handler: srv.Handler()}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	listener, port, err := listenWithFallback(preferredPort)
+	if err != nil {
+		return err
+	}
+
+	srv := &http.Server{Handler: httpHandler}
+	done := make(chan error, 1)
+	httpServer = srv
+	httpDone = done
+	actualPort = port
 
 	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			log.Printf("graceful shutdown failed: %v", err)
+		err := srv.Serve(listener)
+		if err != nil && !isNormalShutdownError(err) {
+			log.Printf("server stopped unexpectedly: %v", err)
 		}
+		done <- err
 	}()
 
-	fmt.Fprintf(httplog.Out, "listening on http://localhost:%s\n", actualPort)
-	fmt.Fprintf(httplog.Out, "webroot: %s\n", webroot)
-	fmt.Fprintf(httplog.Out, "config:  %s\n", store.Path())
-	if err := httpServer.Serve(listener); err != nil && !isNormalShutdownError(err) {
-		log.Fatalf("server stopped unexpectedly: %v", err)
+	fmt.Fprintf(httplog.Out, "listening on http://localhost:%s\n", port)
+	fmt.Fprintf(httplog.Out, "webroot: %s\n", webrootPath)
+	fmt.Fprintf(httplog.Out, "config:  %s\n", configPathStr)
+	return nil
+}
+
+func stopHTTP() {
+	httpMu.Lock()
+	srv := httpServer
+	done := httpDone
+	httpServer = nil
+	httpDone = nil
+	httpMu.Unlock()
+	if srv == nil {
+		return
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("graceful shutdown failed: %v", err)
+	}
+	if done != nil {
+		<-done
+	}
+}
+
+func restartHTTP() {
+	stopHTTP()
+	if err := startHTTP(); err != nil {
+		alert("Jukeboks", fmt.Sprintf("failed to restart server: %v", err))
+	}
+}
+
+func servingURL(path string) string {
+	httpMu.Lock()
+	port := actualPort
+	httpMu.Unlock()
+	if port == "" {
+		port = preferredPort
+	}
+	return "http://localhost:" + port + path
 }
 
 func resolvePath(explicit, name string) string {
@@ -126,7 +191,7 @@ func listenWithFallback(port string) (net.Listener, string, error) {
 		listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", candidatePort))
 		if err == nil {
 			if candidatePort != basePort {
-				fmt.Printf("port %d was busy, using %d instead\n", basePort, candidatePort)
+				fmt.Fprintf(httplog.Out, "port %d was busy, using %d instead\n", basePort, candidatePort)
 			}
 			return listener, strconv.Itoa(candidatePort), nil
 		}

@@ -302,8 +302,9 @@ The proxy is generic: any `/cmd/ytmd/<path>` maps to `/api/v1/<path>` even if it
 
 1. Start YTMD with its companion / API enabled (default `localhost:26538`).
 2. From the repo root: `just run` (or run the packaged exe from a folder that contains `webroot/`).
-3. Open `http://localhost:42420/` — Admin and Overlay links are on the landing page.
-4. In OBS: Browser Source → Overlay URL. The OBS machine must reach YTMD’s WebSocket port.
+3. On Windows the process lives in the system tray (no console window when started from Explorer). Left- or right-click the tray icon for Home / Admin / Overlay, Restart, or Quit. Start it from a terminal to see HTTP log output.
+4. Open `http://localhost:42420/` — Admin and Overlay links are on the landing page (or use the tray menu).
+5. In OBS: Browser Source → Overlay URL. The OBS machine must reach YTMD’s WebSocket port.
 
 ```text
 just run
@@ -315,17 +316,18 @@ just run
 #   -config path/to/jukeboks.json
 ```
 
-If the preferred port is busy, jukeboks tries `port` … `port+9`. Ctrl+C / SIGTERM shuts down with a 5s timeout.
+If the preferred port is busy, jukeboks tries `port` … `port+9`. On Windows, Quit from the tray shuts down with a 5s timeout. Elsewhere, Ctrl+C / SIGTERM does the same.
 
 | Recipe | What |
 |--------|------|
-| `just run` | `go run ./cmd/jukeboks` |
+| `just run` | `go run` (Windows: `-H=windowsgui`, tray) |
 | `just test` | `go test ./...` |
-| `just build` | `jukeboks.exe` in repo root |
+| `just build` | `jukeboks.exe` in repo root (Windows GUI / tray) |
 | `just package` | `dist/jukeboks.exe` + `dist/webroot/` |
 | `just package-zip` | Zip of `dist/` (exe + webroot at archive root) |
 | `just verify-package` | Rebuilds `dist/` and validates install layout (and zip if present) |
 | `just fmt` | `gofmt` on `cmd` + `internal` |
+| `just icon` | Rebuild tray/exe icon from `webroot/img/jukeboks.png` |
 
 Runtime looks for `webroot/` and `jukeboks.json` next to the executable when packaged (Start Menu shortcuts still work), otherwise in the current working directory. `just run` from the repo root uses `./webroot` and `./jukeboks.json`.
 
@@ -334,7 +336,7 @@ Runtime looks for `webroot/` and `jukeboks.json` next to the executable when pac
 ## Layout
 
 ```text
-cmd/jukeboks/          flags, listen, shutdown
+cmd/jukeboks/          flags, listen, shutdown, Windows tray + exe icon
 internal/config/       load/save/normalize, mtime-aware store
 internal/policy/       blacklist + maxDuration
 internal/ytmd/         upstream client, route map, song/queue parsers
